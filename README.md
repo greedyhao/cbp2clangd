@@ -79,8 +79,8 @@ cbp2clangd app.cbp ../../../
 
 ## 支持的编译器
 
-工具主要针对 RISC-V 架构的编译器进行了优化，支持以下编译器 ID：
-- riscv32-v1
+工具主要针对中科蓝讯 RISC-V 架构的编译器进行了优化，支持以下编译器 ID：
+- riscv32
 - riscv32-v2
 - riscv32-v3
 
