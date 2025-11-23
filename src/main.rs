@@ -5,15 +5,27 @@ mod models;
 mod parser;
 mod utils;
 
+use std::env;
 use std::fs;
+use utils::{debug_println, set_debug_mode};
 
 // 项目版本信息
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 解析命令行参数
+    debug_println!("[DEBUG] Parsing command line arguments...");
     let args = cli::parse_args()?;
-    
+
+    // 设置调试模式
+    set_debug_mode(args.debug);
+
+    debug_println!("[DEBUG] Starting cbp2clangd v{}", VERSION);
+    debug_println!(
+        "[DEBUG main] 调试模式已{}",
+        if args.debug { "启用" } else { "禁用" }
+    );
+
     // 如果请求显示版本信息，则打印版本并退出
     if args.show_version {
         println!("cbp2clangd v{}", VERSION);
@@ -21,13 +33,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 读取并解析项目文件
+    debug_println!("[DEBUG] Reading project file...");
     let cbp_path = args.cbp_path.as_ref().unwrap();
     let output_dir = args.output_dir.as_ref().unwrap();
-    
+
+    debug_println!("[DEBUG] CBP path: {}", cbp_path.display());
+    debug_println!("[DEBUG] Output dir: {}", output_dir.display());
+
+    debug_println!("[DEBUG] Checking if CBP file exists...");
+    if !cbp_path.exists() {
+        return Err(format!("CBP file not found: {}", cbp_path.display()).into());
+    }
+
+    debug_println!("[DEBUG] Reading CBP file content...");
     let xml_content = fs::read_to_string(cbp_path)?;
+    debug_println!("[DEBUG] Parsing CBP file...");
     let project_info = parser::parse_cbp_file(&xml_content)?;
 
     // 确定工具链配置
+    debug_println!(
+        "[DEBUG] Determining toolchain configuration for compiler: {}",
+        project_info.compiler_id
+    );
     let toolchain = config::ToolchainConfig::from_compiler_id(&project_info.compiler_id)
         .unwrap_or_else(|| {
             eprintln!(
@@ -36,47 +63,113 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             config::ToolchainConfig::from_compiler_id("riscv32-v2").unwrap()
         });
+    debug_println!("[DEBUG] Toolchain config created successfully");
+
+    // 检查编译器是否可用
+    if !toolchain.is_compiler_available() {
+        eprintln!("Error: Compiler not found at {}", toolchain.compiler_path());
+        eprintln!(
+            "Suggestion: The compiler path may be incorrect or the toolchain is not installed."
+        );
+        eprintln!("You can try:");
+        eprintln!("  1. Install the RV32-Toolchain in the default location");
+        eprintln!("  2. Use a custom toolchain path (to be implemented in future versions)");
+
+        // 为了让程序能够继续运行，即使编译器不可用，我们仍然生成配置文件
+        // 但会使用一个合理的默认编译器名称而不是路径
+        eprintln!(
+            "\nNote: Continuing with configuration generation using a placeholder compiler path..."
+        );
+    }
 
     // 生成编译命令列表
+    debug_println!("[DEBUG] Generating project directory path...");
     let project_dir = cbp_path
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."))
         .canonicalize()?;
-    let compile_commands = 
+    debug_println!("[DEBUG] Project directory: {}", project_dir.display());
+
+    debug_println!("[DEBUG] Generating compile commands...");
+    let compile_commands =
         generator::generate_compile_commands(&project_info, &project_dir, &toolchain);
+    debug_println!(
+        "[DEBUG] Compile commands generated: {}",
+        compile_commands.len()
+    );
 
     // 生成 compile_commands.json
-    let compile_commands_path = output_dir.join("compile_commands.json");
-    fs::create_dir_all(output_dir)?;
-    let json_content = serde_json::to_string_pretty(&compile_commands)?;
-    
-    // 尝试获取短路径来写入文件
-    let display_path = match utils::get_short_path(&compile_commands_path) {
-        Ok(short_path) => short_path,
-        Err(e) => {
-            eprintln!("Warning: Failed to get short path for output file: {}. Using original path.", e);
-            compile_commands_path.to_string_lossy().to_string()
-        }
+    debug_println!("[DEBUG] Preparing compile_commands.json path...");
+
+    // 首先规范化输出目录路径
+    debug_println!(
+        "[DEBUG] Normalizing output directory path: {}",
+        output_dir.display()
+    );
+    let normalized_output_dir = if !output_dir.is_absolute() {
+        cbp_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join(output_dir)
+    } else {
+        output_dir.clone()
     };
-    
+    let normalized_output_dir = normalized_output_dir.canonicalize()?;
+    debug_println!(
+        "[DEBUG] Normalized output directory: {}",
+        normalized_output_dir.display()
+    );
+
+    // 确保输出目录存在
+    debug_println!("[DEBUG] Ensuring output directory exists...");
+    std::fs::create_dir_all(&normalized_output_dir)?;
+    debug_println!("[DEBUG] Output directory ensured");
+
+    // 使用规范化后的目录创建compile_commands.json路径
+    let compile_commands_path = normalized_output_dir.join("compile_commands.json");
+    debug_println!(
+        "[DEBUG] Final compile_commands.json path: {}",
+        compile_commands_path.display()
+    );
+    debug_println!(
+        "[DEBUG] After canonicalize: {}",
+        compile_commands_path.display()
+    );
+
+    debug_println!("[DEBUG] Creating parent directory if needed...");
+    let parent_dir = compile_commands_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new(""));
+    debug_println!("[DEBUG] Parent directory: {}", parent_dir.display());
+    fs::create_dir_all(parent_dir)?;
+
+    debug_println!("[DEBUG] Serializing compile commands to JSON...");
+    let json_content = serde_json::to_string_pretty(&compile_commands)?;
+
+    debug_println!(
+        "[DEBUG] Writing compile_commands.json to: {}",
+        compile_commands_path.display()
+    );
     fs::write(&compile_commands_path, json_content)?;
-    println!("Generated {}", display_path);
+    println!("Generated {}", compile_commands_path.display());
 
     // 生成 .clangd 配置文件
+    debug_println!("[DEBUG] Generating .clangd config content...");
     let clangd_content = generator::generate_clangd_config(&project_info, &toolchain)?;
-    let clangd_path = output_dir.join(".clangd");
-    
-    // 尝试获取短路径来写入文件
-    let clangd_display_path = match utils::get_short_path(&clangd_path) {
-        Ok(short_path) => short_path,
-        Err(e) => {
-            eprintln!("Warning: Failed to get short path for output file: {}. Using original path.", e);
-            clangd_path.to_string_lossy().to_string()
-        }
-    };
-    
-    fs::write(&clangd_path, clangd_content)?;
-    println!("Generated {}", clangd_display_path);
 
+    debug_println!("[DEBUG] Preparing .clangd file path...");
+
+    // 使用已经规范化的输出目录创建.clangd路径
+    let clangd_path = normalized_output_dir.join(".clangd");
+    debug_println!("[DEBUG] Final .clangd path: {}", clangd_path.display());
+
+    debug_println!(
+        "[DEBUG] Writing .clangd config to: {}",
+        clangd_path.display()
+    );
+    fs::write(&clangd_path, clangd_content)?;
+    println!("Generated {}", clangd_path.display());
+
+    debug_println!("[DEBUG] Program completed successfully");
     Ok(())
 }

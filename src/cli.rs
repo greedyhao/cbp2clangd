@@ -6,25 +6,38 @@ pub struct CliArgs {
     pub cbp_path: Option<PathBuf>,
     pub output_dir: Option<PathBuf>,
     pub show_version: bool,
+    pub debug: bool,
 }
 
 /// 解析命令行参数
 pub fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
-    let args: Vec<String> = env::args().collect();
-    
+    let mut args: Vec<String> = env::args().collect();
+
+    // 检查并移除--debug标志
+    let debug = args.iter().any(|arg| arg == "--debug");
+    if let Some(pos) = args.iter().position(|arg| arg == "--debug") {
+        args.remove(pos);
+    }
+
     // 检查是否请求显示版本
     if args.len() == 2 && (args[1] == "--version" || args[1] == "-v") {
         return Ok(CliArgs {
             cbp_path: None,
             output_dir: None,
             show_version: true,
+            debug,
         });
     }
-    
+
     // 检查是否有足够的参数
     if args.len() != 2 && args.len() != 3 {
-        eprintln!("Usage: {} <project.cbp> [output_dir]", args[0]);
-        eprintln!("       {} --version | -v    Show version information", args[0]);
+        eprintln!("Usage: {} [--debug] <project.cbp> [output_dir]", args[0]);
+        eprintln!(
+            "       {} --version | -v    Show version information",
+            args[0]
+        );
+        eprintln!("Options:");
+        eprintln!("  --debug      Enable debug logging");
         std::process::exit(1);
     }
 
@@ -35,7 +48,18 @@ pub fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     }
 
     let output_dir = if args.len() == 3 {
-        PathBuf::from(&args[2])
+        let output_path = PathBuf::from(&args[2]);
+        // 如果输出路径是相对路径，则基于cbp文件的目录
+        if output_path.is_relative() {
+            if let Some(cbp_parent) = cbp_path.parent() {
+                cbp_parent.join(output_path)
+            } else {
+                // 如果cbp_path没有父目录，则使用当前目录
+                PathBuf::from(".").join(output_path)
+            }
+        } else {
+            output_path
+        }
     } else {
         cbp_path
             .parent()
@@ -47,5 +71,6 @@ pub fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         cbp_path: Some(cbp_path),
         output_dir: Some(output_dir),
         show_version: false,
+        debug,
     })
 }
