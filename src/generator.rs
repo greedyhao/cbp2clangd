@@ -202,7 +202,7 @@ pub fn generate_compile_commands(
 /// 生成ninja构建文件内容
 pub fn generate_ninja_build(
     project_info: &ProjectInfo,
-    project_dir: &Path,
+    _project_dir: &Path,
     toolchain: &ToolchainConfig,
 ) -> Result<String, Box<dyn std::error::Error>> {
     debug_println!("[DEBUG generator] Starting to generate ninja build file...");
