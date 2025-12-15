@@ -276,7 +276,25 @@ pub fn generate_ninja_build(
         .unwrap_or_else(|| std::ffi::OsStr::new("output"))
         .to_string_lossy();
     let target_name = format!("{}.elf", project_name);
+    
+    // 构建链接标志
+    let mut link_flags: Vec<String> = Vec::new();
+    for opt in &project_info.linker_options {
+        // 替换 $(TARGET_OBJECT_DIR) 为实际的 object_output 路径
+        let replaced_opt = opt.replace("$(TARGET_OBJECT_DIR)", &project_info.object_output);
+        link_flags.push(replaced_opt);
+    }
+    for lib_dir in &project_info.linker_lib_dirs {
+        link_flags.push(lib_dir.clone());
+    }
+    for lib in &project_info.linker_libs {
+        link_flags.push(lib.clone());
+    }
+    
     ninja_content.push_str(&format!("build {}: link {}\n", target_name, obj_files.join(" ")));
+    if !link_flags.is_empty() {
+        ninja_content.push_str(&format!("  flags = {}\n", link_flags.join(" ")));
+    }
     ninja_content.push_str("\n");
 
     // 默认目标

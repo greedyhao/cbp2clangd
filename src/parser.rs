@@ -10,6 +10,9 @@ pub struct ProjectInfo {
     pub source_files: Vec<String>,
     pub march_info: MarchInfo,
     pub object_output: String,
+    pub linker_options: Vec<String>,
+    pub linker_libs: Vec<String>,
+    pub linker_lib_dirs: Vec<String>,
 }
 
 /// 解析Code::Blocks项目文件
@@ -58,7 +61,11 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
     let mut global_cflags = Vec::new();
     let mut include_dirs = Vec::new();
     let mut march_info = MarchInfo::default();
+    let mut linker_options = Vec::new();
+    let mut linker_libs = Vec::new();
+    let mut linker_lib_dirs = Vec::new();
 
+    // 解析Compiler节点
     if let Some(compiler_node) = project
         .children()
         .find(|n| n.tag_name().name() == "Compiler")
@@ -90,6 +97,27 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
             }
             if let Some(dir) = add.attribute("directory") {
                 include_dirs.push(format!("-I{}", dir));
+            }
+        }
+    }
+    
+    // 解析Linker节点
+    if let Some(linker_node) = project
+        .children()
+        .find(|n| n.tag_name().name() == "Linker")
+    {
+        for add in linker_node
+            .children()
+            .filter(|n| n.tag_name().name() == "Add")
+        {
+            if let Some(opt) = add.attribute("option") {
+                linker_options.push(opt.to_string());
+            }
+            if let Some(lib) = add.attribute("library") {
+                linker_libs.push(format!("-l{}", lib));
+            }
+            if let Some(dir) = add.attribute("directory") {
+                linker_lib_dirs.push(format!("-L{}", dir));
             }
         }
     }
@@ -150,5 +178,8 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
         source_files,
         march_info,
         object_output,
+        linker_options,
+        linker_libs,
+        linker_lib_dirs,
     })
 }
