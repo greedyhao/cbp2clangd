@@ -276,7 +276,6 @@ pub fn generate_ninja_build(
     ninja_content.push_str("  deps = gcc\n");
     ninja_content.push_str("\n");
 
-
     // 构建对象文件列表，分为普通对象文件和特殊对象文件
     let mut regular_obj_files = Vec::new();
 
@@ -303,7 +302,7 @@ pub fn generate_ninja_build(
                     _ => {}
                 }
             }
-            
+
             // 构建规范化后的路径
             let mut full_path = Path::new(&project_info.object_output).to_path_buf();
             for component in normalized_path {
@@ -346,7 +345,7 @@ pub fn generate_ninja_build(
         } else {
             // 如果没有找到-o选项，使用默认的输出文件名
             let src_path = Path::new(&special_file.filename);
-            
+
             // 构建规范化的对象文件路径，确保在output目录内
             let mut normalized_path = Vec::new();
             for component in src_path.components() {
@@ -362,7 +361,7 @@ pub fn generate_ninja_build(
                     _ => {}
                 }
             }
-            
+
             let mut full_path = Path::new(&project_info.object_output).to_path_buf();
             for component in normalized_path {
                 full_path.push(component);
@@ -416,7 +415,7 @@ pub fn generate_ninja_build(
     // 构建链接标志，分为前导标志和库标志
     let mut pre_link_flags: Vec<String> = Vec::new();
     let mut lib_flags: Vec<String> = Vec::new();
-    
+
     // 添加链接器选项
     for opt in &project_info.linker_options {
         // 替换 $(TARGET_OBJECT_DIR) 为实际的 object_output 路径
@@ -434,7 +433,10 @@ pub fn generate_ninja_build(
 
     // 修改链接规则，将库标志放在目标文件之后
     ninja_content.push_str("rule link\n");
-    ninja_content.push_str(&format!("  command = {} $pre_flags $in $lib_flags -o $out\n", linker));
+    ninja_content.push_str(&format!(
+        "  command = {} $pre_flags $in $lib_flags -o $out\n",
+        linker
+    ));
     ninja_content.push_str("\n");
 
     // 生成主目标的构建规则，确保特殊文件被编译但不被链接
@@ -459,7 +461,7 @@ pub fn generate_ninja_build(
     if !pre_link_flags.is_empty() {
         ninja_content.push_str(&format!("  pre_flags = {}\n", pre_link_flags.join(" ")));
     }
-    
+
     // 添加库链接标志，放在目标文件之后
     if !lib_flags.is_empty() {
         ninja_content.push_str(&format!("  lib_flags = {}\n", lib_flags.join(" ")));
