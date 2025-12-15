@@ -11,7 +11,11 @@
 - 检测 RISC-V 架构相关的编译标志（如 -march）
 - 生成标准化的 compile_commands.json 文件
 - 生成 .clangd 配置文件，优化编辑器集成
+- 生成 build.ninja 构建文件，支持 ninja 编译
 - 支持多种编译器配置，自动适配不同工具链
+- 支持选择链接器类型（gcc 或 ld）
+- 支持解析链接脚本、链接选项和静态库配置
+- 支持自定义中间文件输出目录
 
 ## 安装方法
 
@@ -39,11 +43,13 @@
 ### 基本语法
 
 ```bash
-cbp2clangd <cbp文件路径> <输出目录路径>
+cbp2clangd [--debug] [--linker <type>] <cbp文件路径> [输出目录路径]
 ```
 
 ### 参数说明
 
+- `--debug`: 启用调试日志
+- `--linker <type>` 或 `-l <type>`: 指定链接器类型（gcc 或 ld，默认为 gcc）
 - `<cbp文件路径>`: Code::Blocks 项目文件（.cbp）的路径
 - `<输出目录路径>`: 生成配置文件的目标目录（通常是项目根目录）
 
@@ -55,15 +61,38 @@ cbp2clangd --version
 
 ### 使用示例
 
+#### 示例 1：基本使用
+
 将 app.cbp 项目转换为 clangd 配置，并输出到上级目录：
 
 ```bash
 cbp2clangd app.cbp ../../../
 ```
 
-执行后，工具将在指定的输出目录生成两个文件：
-- `.clangd`: clangd 的配置文件
-- `compile_commands.json`: 编译命令数据库
+#### 示例 2：指定使用 ld 链接器
+
+```bash
+cbp2clangd --linker ld app.cbp
+```
+
+或使用短格式：
+
+```bash
+cbp2clangd -l ld app.cbp
+```
+
+#### 示例 3：启用调试日志
+
+```bash
+cbp2clangd --debug app.cbp
+```
+
+### 生成文件
+
+执行后，工具将生成以下文件：
+- `.clangd`: clangd 的配置文件（输出到指定目录）
+- `compile_commands.json`: 编译命令数据库（输出到指定目录）
+- `build.ninja`: Ninja 构建文件（始终输出到 CBP 项目同目录）
 
 ## 编辑器配置
 

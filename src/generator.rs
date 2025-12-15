@@ -229,6 +229,33 @@ pub fn generate_ninja_build(
         );
         "riscv32-elf-gcc".to_string()
     };
+    
+    // 获取链接器路径
+    let linker_path = toolchain.linker_path(&project_info.linker_type);
+    let linker_exists = std::path::Path::new(&linker_path).exists();
+    let linker = if linker_exists {
+        match get_short_path(&linker_path) {
+            Ok(short_path) => short_path,
+            Err(e) => {
+                println!(
+                    "[WARNING generator] Failed to get short path for linker: {}. Using original path.",
+                    e
+                );
+                let long_path = format!("\\?\\{}", linker_path);
+                long_path
+            }
+        }
+    } else {
+        println!(
+            "[WARNING generator] Linker path {} does not exist. Using placeholder.",
+            linker_path
+        );
+        if project_info.linker_type == "ld" {
+            "riscv32-elf-ld".to_string()
+        } else {
+            "riscv32-elf-gcc".to_string()
+        }
+    };
 
     // 构建基础编译器标志
     let mut base_flags: Vec<&str> = Vec::new();
@@ -251,7 +278,7 @@ pub fn generate_ninja_build(
     ninja_content.push_str("  deps = gcc\n");
     ninja_content.push_str("\n");
     ninja_content.push_str("rule link\n");
-    ninja_content.push_str(&format!("  command = {} $flags $in -o $out\n", compiler));
+    ninja_content.push_str(&format!("  command = {} $flags $in -o $out\n", linker));
     ninja_content.push_str("\n");
 
     // 构建对象文件列表

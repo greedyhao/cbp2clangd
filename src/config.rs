@@ -77,6 +77,27 @@ impl ToolchainConfig {
         );
         compiler_path
     }
+    
+    /// 获取链接器路径，根据类型返回gcc或ld
+    pub fn linker_path(&self, linker_type: &str) -> String {
+        debug_println!("[DEBUG config] Building linker path for type: {}", linker_type);
+        let base_path = self.get_base_path();
+        debug_println!("[DEBUG config] Base path: {}", base_path);
+        
+        let linker_path = if linker_type == "ld" {
+            format!("{}\\bin\\riscv32-elf-ld.exe", base_path)
+        } else {
+            // 默认使用gcc作为链接器
+            self.compiler_path()
+        };
+        
+        debug_println!("[DEBUG config] Final linker path: {}", linker_path);
+        debug_println!(
+            "[DEBUG config] Linker path exists: {}",
+            std::path::Path::new(&linker_path).exists()
+        );
+        linker_path
+    }
 
     pub fn include_paths(&self) -> Vec<String> {
         debug_println!("[DEBUG config] Building include paths...");

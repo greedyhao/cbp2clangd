@@ -13,6 +13,7 @@ pub struct ProjectInfo {
     pub linker_options: Vec<String>,
     pub linker_libs: Vec<String>,
     pub linker_lib_dirs: Vec<String>,
+    pub linker_type: String,
 }
 
 /// 解析Code::Blocks项目文件
@@ -181,5 +182,6 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
         linker_options,
         linker_libs,
         linker_lib_dirs,
+        linker_type: "gcc".to_string(),
     })
 }

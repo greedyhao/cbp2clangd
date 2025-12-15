@@ -7,6 +7,7 @@ pub struct CliArgs {
     pub output_dir: Option<PathBuf>,
     pub show_version: bool,
     pub debug: bool,
+    pub linker_type: String,
 }
 
 /// 解析命令行参数
@@ -18,6 +19,20 @@ pub fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     if let Some(pos) = args.iter().position(|arg| arg == "--debug") {
         args.remove(pos);
     }
+    
+    // 检查并移除--linker/-l参数
+    let mut linker_type = "gcc".to_string();
+    if let Some(linker_pos) = args.iter().position(|arg| arg == "--linker" || arg == "-l") {
+        if linker_pos + 1 < args.len() {
+            linker_type = args[linker_pos + 1].clone();
+            args.remove(linker_pos + 1);
+            args.remove(linker_pos);
+        } else {
+            eprintln!("Error: --linker/-l option requires an argument");
+            eprintln!("Usage: {} [--debug] [--linker <type>] <project.cbp> [output_dir]", args[0]);
+            std::process::exit(1);
+        }
+    }
 
     // 检查是否请求显示版本
     if args.len() == 2 && (args[1] == "--version" || args[1] == "-v") {
@@ -26,18 +41,21 @@ pub fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             output_dir: None,
             show_version: true,
             debug,
+            linker_type,
         });
     }
 
     // 检查是否有足够的参数
     if args.len() != 2 && args.len() != 3 {
-        eprintln!("Usage: {} [--debug] <project.cbp> [output_dir]", args[0]);
+        eprintln!("Usage: {} [--debug] [--linker <type>] <project.cbp> [output_dir]", args[0]);
         eprintln!(
             "       {} --version | -v    Show version information",
             args[0]
         );
         eprintln!("Options:");
-        eprintln!("  --debug      Enable debug logging");
+        eprintln!("  --debug            Enable debug logging");
+        eprintln!("  --linker <type>    Specify linker type (gcc or ld)");
+        eprintln!("  -l <type>          Short form for --linker");
         std::process::exit(1);
     }
 
@@ -72,5 +90,6 @@ pub fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         output_dir: Some(output_dir),
         show_version: false,
         debug,
+        linker_type,
     })
 }

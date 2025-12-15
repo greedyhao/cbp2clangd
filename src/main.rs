@@ -39,6 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     debug_println!("[DEBUG] CBP path: {}", cbp_path.display());
     debug_println!("[DEBUG] Output dir: {}", output_dir.display());
+    debug_println!("[DEBUG] Linker type: {}", args.linker_type);
 
     debug_println!("[DEBUG] Checking if CBP file exists...");
     if !cbp_path.exists() {
@@ -48,7 +49,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     debug_println!("[DEBUG] Reading CBP file content...");
     let xml_content = fs::read_to_string(cbp_path)?;
     debug_println!("[DEBUG] Parsing CBP file...");
-    let project_info = parser::parse_cbp_file(&xml_content)?;
+    let mut project_info = parser::parse_cbp_file(&xml_content)?;
+    
+    // 使用命令行参数中的linker_type覆盖解析结果
+    project_info.linker_type = args.linker_type;
 
     // 确定工具链配置
     debug_println!(
