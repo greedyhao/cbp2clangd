@@ -410,61 +410,131 @@ pub fn generate_ninja_build(
     }
 
     // 链接目标 - 使用ProjectInfo中的output字段
-    let target_name = project_info.output.clone();
+    let mut target_name = project_info.output.clone();
+    
+    // 检查是否为静态库目标（.a结尾）
+    let is_static_lib = target_name.ends_with(".a");
 
-    // 构建链接标志，分为前导标志和库标志
-    let mut pre_link_flags: Vec<String> = Vec::new();
-    let mut lib_flags: Vec<String> = Vec::new();
-
-    // 添加链接器选项
-    for opt in &project_info.linker_options {
-        // 替换 $(TARGET_OBJECT_DIR) 为实际的 object_output 路径
-        let replaced_opt = opt.replace("$(TARGET_OBJECT_DIR)", &project_info.object_output);
-        pre_link_flags.push(replaced_opt);
+    // 处理静态库文件名，添加lib前缀（如果没有的话）
+    if is_static_lib {
+        let target_path = Path::new(&target_name);
+        if let Some(file_name) = target_path.file_name() {
+            let file_name_str = file_name.to_string_lossy().to_string();
+            if !file_name_str.starts_with("lib") {
+                let dir = target_path.parent().unwrap_or_else(|| Path::new("."));
+                let stem = file_name_str.strip_suffix(".a").unwrap_or(&file_name_str);
+                let new_file_name = format!("lib{}.a", stem);
+                target_name = dir.join(new_file_name).to_string_lossy().to_string();
+            }
+        }
     }
-    // 添加链接库目录（-L选项）
-    for lib_dir in &project_info.linker_lib_dirs {
-        pre_link_flags.push(lib_dir.clone());
-    }
-    // 添加链接库（-l选项）
-    for lib in &project_info.linker_libs {
-        lib_flags.push(lib.clone());
-    }
-
-    // 修改链接规则，将库标志放在目标文件之后
-    ninja_content.push_str("rule link\n");
-    ninja_content.push_str(&format!(
-        "  command = {} $pre_flags $in $lib_flags -o $out\n",
-        linker
-    ));
-    ninja_content.push_str("\n");
 
     // 生成主目标的构建规则，确保特殊文件被编译但不被链接
-    if special_output_files.is_empty() {
-        // 没有特殊文件，直接使用普通对象文件
+    if is_static_lib {
+        // 静态库目标
+        // 定义ar规则
+        let ar_path = toolchain.ar_path();
+        let ar_exists = std::path::Path::new(&ar_path).exists();
+        let ar = if ar_exists {
+            match get_short_path(&ar_path) {
+                Ok(short_path) => short_path,
+                Err(e) => {
+                    println!(
+                        "[WARNING generator] Failed to get short path for ar: {}. Using original path.",
+                        e
+                    );
+                    let long_path = format!("\\?\\{}", ar_path);
+                    long_path
+                }
+            }
+        } else {
+            println!(
+                "[WARNING generator] Ar path {} does not exist. Using placeholder.",
+                ar_path
+            );
+            "riscv32-elf-ar".to_string()
+        };
+        
+        ninja_content.push_str("rule ar\n");
         ninja_content.push_str(&format!(
-            "build {}: link {}\n",
-            target_name,
-            regular_obj_files.join(" ")
+            "  command = {} crs $out $in\n",
+            ar
         ));
+        ninja_content.push_str("\n");
+        
+        // 生成静态库构建规则
+        if special_output_files.is_empty() {
+            // 没有特殊文件，直接使用普通对象文件
+            ninja_content.push_str(&format!(
+                "build {}: ar {}\n",
+                target_name,
+                regular_obj_files.join(" ")
+            ));
+        } else {
+            // 有特殊文件，将它们作为隐式依赖，确保被编译但不被链接
+            ninja_content.push_str(&format!(
+                "build {}: ar {} | {}\n",
+                target_name,
+                regular_obj_files.join(" "),
+                special_output_files.join(" ")
+            ));
+        }
     } else {
-        // 有特殊文件，将它们作为隐式依赖，确保被编译但不被链接
+        // 可执行文件目标
+        // 构建链接标志，分为前导标志和库标志
+        let mut pre_link_flags: Vec<String> = Vec::new();
+        let mut lib_flags: Vec<String> = Vec::new();
+
+        // 添加链接器选项
+        for opt in &project_info.linker_options {
+            // 替换 $(TARGET_OBJECT_DIR) 为实际的 object_output 路径
+            let replaced_opt = opt.replace("$(TARGET_OBJECT_DIR)", &project_info.object_output);
+            pre_link_flags.push(replaced_opt);
+        }
+        // 添加链接库目录（-L选项）
+        for lib_dir in &project_info.linker_lib_dirs {
+            pre_link_flags.push(lib_dir.clone());
+        }
+        // 添加链接库（-l选项）
+        for lib in &project_info.linker_libs {
+            lib_flags.push(lib.clone());
+        }
+
+        // 修改链接规则，将库标志放在目标文件之后
+        ninja_content.push_str("rule link\n");
         ninja_content.push_str(&format!(
-            "build {}: link {} | {}\n",
-            target_name,
-            regular_obj_files.join(" "),
-            special_output_files.join(" ")
+            "  command = {} $pre_flags $in $lib_flags -o $out\n",
+            linker
         ));
-    }
+        ninja_content.push_str("\n");
 
-    // 添加前导链接标志
-    if !pre_link_flags.is_empty() {
-        ninja_content.push_str(&format!("  pre_flags = {}\n", pre_link_flags.join(" ")));
-    }
+        // 生成可执行文件构建规则
+        if special_output_files.is_empty() {
+            // 没有特殊文件，直接使用普通对象文件
+            ninja_content.push_str(&format!(
+                "build {}: link {}\n",
+                target_name,
+                regular_obj_files.join(" ")
+            ));
+        } else {
+            // 有特殊文件，将它们作为隐式依赖，确保被编译但不被链接
+            ninja_content.push_str(&format!(
+                "build {}: link {} | {}\n",
+                target_name,
+                regular_obj_files.join(" "),
+                special_output_files.join(" ")
+            ));
+        }
 
-    // 添加库链接标志，放在目标文件之后
-    if !lib_flags.is_empty() {
-        ninja_content.push_str(&format!("  lib_flags = {}\n", lib_flags.join(" ")));
+        // 添加前导链接标志
+        if !pre_link_flags.is_empty() {
+            ninja_content.push_str(&format!("  pre_flags = {}\n", pre_link_flags.join(" ")));
+        }
+
+        // 添加库链接标志，放在目标文件之后
+        if !lib_flags.is_empty() {
+            ninja_content.push_str(&format!("  lib_flags = {}\n", lib_flags.join(" ")));
+        }
     }
     ninja_content.push_str("\n");
 

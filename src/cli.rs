@@ -8,6 +8,7 @@ pub struct CliArgs {
     pub show_version: bool,
     pub debug: bool,
     pub linker_type: String,
+    pub test_mode: bool,
 }
 
 /// 解析命令行参数
@@ -17,6 +18,12 @@ pub fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     // 检查并移除--debug标志
     let debug = args.iter().any(|arg| arg == "--debug");
     if let Some(pos) = args.iter().position(|arg| arg == "--debug") {
+        args.remove(pos);
+    }
+
+    // 检查是否是测试模式
+    let is_test_mode = args.iter().any(|arg| arg == "--test");
+    if let Some(pos) = args.iter().position(|arg| arg == "--test") {
         args.remove(pos);
     }
 
@@ -30,7 +37,7 @@ pub fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         } else {
             eprintln!("Error: --linker/-l option requires an argument");
             eprintln!(
-                "Usage: {} [--debug] [--linker <type>] <project.cbp> [output_dir]",
+                "Usage: {} [--debug] [--test] [--linker <type>] <project.cbp> [output_dir]",
                 args[0]
             );
             std::process::exit(1);
@@ -45,13 +52,26 @@ pub fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             show_version: true,
             debug,
             linker_type,
+            test_mode: false,
+        });
+    }
+
+    // 测试模式：允许args.len() == 1
+    if is_test_mode {
+        return Ok(CliArgs {
+            cbp_path: Some(PathBuf::from("--test")),
+            output_dir: Some(std::env::current_dir()?),
+            show_version: false,
+            debug,
+            linker_type,
+            test_mode: true,
         });
     }
 
     // 检查是否有足够的参数
     if args.len() != 2 && args.len() != 3 {
         eprintln!(
-            "Usage: {} [--debug] [--linker <type>] <project.cbp> [output_dir]",
+            "Usage: {} [--debug] [--test] [--linker <type>] <project.cbp> [output_dir]",
             args[0]
         );
         eprintln!(
@@ -60,6 +80,7 @@ pub fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         );
         eprintln!("Options:");
         eprintln!("  --debug            Enable debug logging");
+        eprintln!("  --test             Enable test mode with built-in XML content");
         eprintln!("  --linker <type>    Specify linker type (gcc or ld)");
         eprintln!("  -l <type>          Short form for --linker");
         std::process::exit(1);
@@ -97,5 +118,6 @@ pub fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         show_version: false,
         debug,
         linker_type,
+        test_mode: false,
     })
 }

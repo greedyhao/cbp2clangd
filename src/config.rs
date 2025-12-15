@@ -102,6 +102,20 @@ impl ToolchainConfig {
         linker_path
     }
 
+    /// 获取ar路径，用于创建静态库
+    pub fn ar_path(&self) -> String {
+        debug_println!("[DEBUG config] Building ar path...");
+        let base_path = self.get_base_path();
+        debug_println!("[DEBUG config] Base path: {}", base_path);
+        let ar_path = format!("{}\\bin\\riscv32-elf-ar.exe", base_path);
+        debug_println!("[DEBUG config] Final ar path: {}", ar_path);
+        debug_println!(
+            "[DEBUG config] Ar path exists: {}",
+            std::path::Path::new(&ar_path).exists()
+        );
+        ar_path
+    }
+
     pub fn include_paths(&self) -> Vec<String> {
         debug_println!("[DEBUG config] Building include paths...");
         let base = self.get_base_path();

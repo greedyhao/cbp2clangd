@@ -41,13 +41,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     debug_println!("[DEBUG] Output dir: {}", output_dir.display());
     debug_println!("[DEBUG] Linker type: {}", args.linker_type);
 
-    debug_println!("[DEBUG] Checking if CBP file exists...");
-    if !cbp_path.exists() {
-        return Err(format!("CBP file not found: {}", cbp_path.display()).into());
-    }
+    // 测试模式：使用内置的XML内容
+    let xml_content = if args.test_mode {
+        // 内置的测试XML内容，包含静态库输出
+        String::from(r#"<?xml version="1.0" encoding="UTF-8"?>
+<CodeBlocks_project_file>
+    <FileVersion major="1" minor="6" />
+    <Project>
+        <Option title="libchatbot" />
+        <Build>
+            <Target title="Debug">
+                <Option output="Output/bin/chatbot.a" prefix_auto="1" extension_auto="0" />
+                <Option object_output="Output/obj/Debug" />
+                <Linker>
+                    <Add library="m" />
+                </Linker>
+            </Target>
+        </Build>
+        <Compiler>
+            <Add option="-Wall" />
+            <Add option="-g" />
+        </Compiler>
+        <Linker>
+            <Add option="-Wl,--gc-sections" />
+        </Linker>
+        <Unit filename="src/chatbot.c">
+            <Option compile="1" />
+        </Unit>
+    </Project>
+</CodeBlocks_project_file>"#)
+    } else {
+        // 正常模式：读取文件内容
+        debug_println!("[DEBUG] Checking if CBP file exists...");
+        if !cbp_path.exists() {
+            return Err(format!("CBP file not found: {}", cbp_path.display()).into());
+        }
 
-    debug_println!("[DEBUG] Reading CBP file content...");
-    let xml_content = fs::read_to_string(cbp_path)?;
+        debug_println!("[DEBUG] Reading CBP file content...");
+        fs::read_to_string(cbp_path)?
+    };
+
     debug_println!("[DEBUG] Parsing CBP file...");
     let mut project_info = parser::parse_cbp_file(&xml_content)?;
 
@@ -88,14 +121,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 生成编译命令列表
     debug_println!("[DEBUG] Generating project directory path...");
-    let project_dir = cbp_path
-        .parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .canonicalize()?;
+    let project_dir = if args.test_mode {
+        // 测试模式：直接使用当前目录
+        std::env::current_dir()?
+    } else {
+        // 正常模式：获取cbp_path的父目录的规范路径
+        cbp_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .canonicalize()?
+    };
     debug_println!("[DEBUG] Project directory: {}", project_dir.display());
 
+    // 生成编译命令列表
     debug_println!("[DEBUG] Generating compile commands...");
-    let compile_commands =
+    let compile_commands = 
         generator::generate_compile_commands(&project_info, &project_dir, &toolchain);
     debug_println!(
         "[DEBUG] Compile commands generated: {}",
@@ -111,10 +151,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         output_dir.display()
     );
     let normalized_output_dir = if !output_dir.is_absolute() {
-        cbp_path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .join(output_dir)
+        project_dir.join(output_dir)
     } else {
         output_dir.clone()
     };
@@ -195,7 +232,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 生成构建脚本文件
     debug_println!("[DEBUG] Generating build script...");
-    let build_script_content =
+    let build_script_content = 
         generator::generate_build_script(&project_info, &toolchain, &project_dir);
     let build_script_path = project_dir.join("build.bat");
     debug_println!(
