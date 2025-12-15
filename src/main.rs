@@ -189,6 +189,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     fs::write(&ninja_path, ninja_content)?;
     println!("Generated {}", ninja_path.display());
+    
+    // 生成构建脚本文件
+    debug_println!("[DEBUG] Generating build script...");
+    let build_script_content = generator::generate_build_script(&project_info, &toolchain, &project_dir);
+    let build_script_path = project_dir.join("build.bat");
+    debug_println!("[DEBUG] Writing build script to: {}", build_script_path.display());
+    fs::write(&build_script_path, build_script_content)?;
+    println!("Generated {}", build_script_path.display());
 
     debug_println!("[DEBUG] Program completed successfully");
     Ok(())

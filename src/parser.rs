@@ -6,10 +6,13 @@ use std::path::Path;
 /// 项目信息结构
 pub struct ProjectInfo {
     pub compiler_id: String,
+    pub project_name: String,
     pub global_cflags: Vec<String>,
     pub include_dirs: Vec<String>,
     pub source_files: Vec<String>,
     pub special_files: Vec<SpecialFileBuildInfo>,
+    pub prebuild_commands: Vec<String>,
+    pub postbuild_commands: Vec<String>,
     pub march_info: MarchInfo,
     pub object_output: String,
     pub linker_options: Vec<String>,
@@ -47,6 +50,19 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
         .find(|n| n.tag_name().name() == "Project")
         .ok_or("No <Project> found")?;
 
+    // === 提取项目名称 ===
+    let mut project_name = "output".to_string(); // default
+    for option in project
+        .children()
+        .filter(|n| n.tag_name().name() == "Option")
+    {
+        if let Some(title) = option.attribute("title") {
+            project_name = title.to_string();
+            break;
+        }
+    }
+    println!("Project name: {}", project_name);
+
     // === 提取 compiler ID ===
     let mut compiler_id = "riscv32-v2".to_string(); // default
     for option in project
@@ -67,6 +83,8 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
     let mut linker_options = Vec::new();
     let mut linker_libs = Vec::new();
     let mut linker_lib_dirs = Vec::new();
+    let mut prebuild_commands = Vec::new();
+    let mut postbuild_commands = Vec::new();
 
     // 解析Compiler节点
     if let Some(compiler_node) = project
@@ -136,6 +154,30 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
             }
             if let Some(dir) = add.attribute("directory") {
                 linker_lib_dirs.push(format!("-L{}", dir));
+            }
+        }
+    }
+    
+    // 解析ExtraCommands节点
+    if let Some(extra_commands_node) = project
+        .children()
+        .find(|n| n.tag_name().name() == "ExtraCommands")
+    {
+        for add in extra_commands_node
+            .children()
+            .filter(|n| n.tag_name().name() == "Add")
+        {
+            if let Some(before) = add.attribute("before") {
+                let trimmed_before = before.trim();
+                if !trimmed_before.is_empty() {
+                    prebuild_commands.push(trimmed_before.to_string());
+                }
+            }
+            if let Some(after) = add.attribute("after") {
+                let trimmed_after = after.trim();
+                if !trimmed_after.is_empty() {
+                    postbuild_commands.push(trimmed_after.to_string());
+                }
             }
         }
     }
@@ -234,10 +276,13 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
 
     Ok(ProjectInfo {
         compiler_id,
+        project_name,
         global_cflags,
         include_dirs,
         source_files,
         special_files,
+        prebuild_commands,
+        postbuild_commands,
         march_info,
         object_output,
         linker_options,
