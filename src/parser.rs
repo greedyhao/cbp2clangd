@@ -9,6 +9,7 @@ pub struct ProjectInfo {
     pub include_dirs: Vec<String>,
     pub source_files: Vec<String>,
     pub march_info: MarchInfo,
+    pub object_output: String,
 }
 
 /// 解析Code::Blocks项目文件
@@ -112,11 +113,42 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
         return Err("No source files (.c/.cpp) found in project.".into());
     }
 
+    // === 解析object_output目录 ===
+    let mut object_output = String::new();
+    
+    // 查找Build节点
+    for build_node in project.children().filter(|n| n.tag_name().name() == "Build") {
+        // 查找Target节点
+        for target_node in build_node.children().filter(|n| n.tag_name().name() == "Target") {
+            // 查找带有object_output属性的Option节点
+            for option_node in target_node.children().filter(|n| n.tag_name().name() == "Option") {
+                if let Some(obj_output) = option_node.attribute("object_output") {
+                    object_output = obj_output.to_string();
+                    break;
+                }
+            }
+            // 找到一个就够了，跳出循环
+            if !object_output.is_empty() {
+                break;
+            }
+        }
+        // 找到一个就够了，跳出循环
+        if !object_output.is_empty() {
+            break;
+        }
+    }
+    
+    // 如果没有找到object_output，使用默认值
+    if object_output.is_empty() {
+        object_output = "./".to_string();
+    }
+
     Ok(ProjectInfo {
         compiler_id,
         global_cflags,
         include_dirs,
         source_files,
         march_info,
+        object_output,
     })
 }

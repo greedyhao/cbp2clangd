@@ -259,7 +259,7 @@ pub fn generate_ninja_build(
     for src in &project_info.source_files {
         let src_path = Path::new(src);
         let src_name = src_path.file_stem().unwrap_or_else(|| std::ffi::OsStr::new(""));
-        let obj_name = format!("{}.o", src_name.to_string_lossy());
+        let obj_name = format!("{}{}.o", project_info.object_output, src_name.to_string_lossy());
         obj_files.push(obj_name);
     }
 
