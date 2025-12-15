@@ -275,9 +275,7 @@ pub fn generate_ninja_build(
     ninja_content.push_str("  depfile = $out.d\n");
     ninja_content.push_str("  deps = gcc\n");
     ninja_content.push_str("\n");
-    ninja_content.push_str("rule link\n");
-    ninja_content.push_str(&format!("  command = {} $flags $in -o $out\n", linker));
-    ninja_content.push_str("\n");
+
 
     // 构建对象文件列表，分为普通对象文件和特殊对象文件
     let mut regular_obj_files = Vec::new();
@@ -390,19 +388,29 @@ pub fn generate_ninja_build(
         .to_string_lossy();
     let target_name = format!("{}.elf", project_name);
 
-    // 构建链接标志
-    let mut link_flags: Vec<String> = Vec::new();
+    // 构建链接标志，分为前导标志和库标志
+    let mut pre_link_flags: Vec<String> = Vec::new();
+    let mut lib_flags: Vec<String> = Vec::new();
+    
+    // 添加链接器选项
     for opt in &project_info.linker_options {
         // 替换 $(TARGET_OBJECT_DIR) 为实际的 object_output 路径
         let replaced_opt = opt.replace("$(TARGET_OBJECT_DIR)", &project_info.object_output);
-        link_flags.push(replaced_opt);
+        pre_link_flags.push(replaced_opt);
     }
+    // 添加链接库目录（-L选项）
     for lib_dir in &project_info.linker_lib_dirs {
-        link_flags.push(lib_dir.clone());
+        pre_link_flags.push(lib_dir.clone());
     }
+    // 添加链接库（-l选项）
     for lib in &project_info.linker_libs {
-        link_flags.push(lib.clone());
+        lib_flags.push(lib.clone());
     }
+
+    // 修改链接规则，将库标志放在目标文件之后
+    ninja_content.push_str("rule link\n");
+    ninja_content.push_str(&format!("  command = {} $pre_flags $in $lib_flags -o $out\n", linker));
+    ninja_content.push_str("\n");
 
     // 生成主目标的构建规则，确保特殊文件被编译但不被链接
     if special_output_files.is_empty() {
@@ -422,8 +430,14 @@ pub fn generate_ninja_build(
         ));
     }
 
-    if !link_flags.is_empty() {
-        ninja_content.push_str(&format!("  flags = {}\n", link_flags.join(" ")));
+    // 添加前导链接标志
+    if !pre_link_flags.is_empty() {
+        ninja_content.push_str(&format!("  pre_flags = {}\n", pre_link_flags.join(" ")));
+    }
+    
+    // 添加库链接标志，放在目标文件之后
+    if !lib_flags.is_empty() {
+        ninja_content.push_str(&format!("  lib_flags = {}\n", lib_flags.join(" ")));
     }
     ninja_content.push_str("\n");
 
