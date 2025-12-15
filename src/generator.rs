@@ -410,12 +410,8 @@ pub fn generate_ninja_build(
         ninja_content.push_str("\n");
     }
 
-    // 链接目标 - 只使用普通对象文件，不包含特殊文件
-    let project_name = project_dir
-        .file_name()
-        .unwrap_or_else(|| std::ffi::OsStr::new("output"))
-        .to_string_lossy();
-    let target_name = format!("{}.elf", project_name);
+    // 链接目标 - 使用ProjectInfo中的output字段
+    let target_name = project_info.output.clone();
 
     // 构建链接标志，分为前导标志和库标志
     let mut pre_link_flags: Vec<String> = Vec::new();

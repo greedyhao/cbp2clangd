@@ -15,6 +15,7 @@ pub struct ProjectInfo {
     pub postbuild_commands: Vec<String>,
     pub march_info: MarchInfo,
     pub object_output: String,
+    pub output: String,
     pub linker_options: Vec<String>,
     pub linker_libs: Vec<String>,
     pub linker_lib_dirs: Vec<String>,
@@ -288,8 +289,9 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
         return Err("No source files (.c/.cpp) or special files found in project.".into());
     }
 
-    // === 解析object_output目录 ===
+    // === 解析object_output目录和output文件 ===
     let mut object_output = String::new();
+    let mut output = String::new();
 
     // 查找Build节点
     for build_node in project
@@ -301,23 +303,25 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
             .children()
             .filter(|n| n.tag_name().name() == "Target")
         {
-            // 查找带有object_output属性的Option节点
+            // 查找带有object_output和output属性的Option节点
             for option_node in target_node
                 .children()
                 .filter(|n| n.tag_name().name() == "Option")
             {
                 if let Some(obj_output) = option_node.attribute("object_output") {
                     object_output = obj_output.to_string();
-                    break;
+                }
+                if let Some(out) = option_node.attribute("output") {
+                    output = out.to_string();
                 }
             }
             // 找到一个就够了，跳出循环
-            if !object_output.is_empty() {
+            if !object_output.is_empty() && !output.is_empty() {
                 break;
             }
         }
         // 找到一个就够了，跳出循环
-        if !object_output.is_empty() {
+        if !object_output.is_empty() && !output.is_empty() {
             break;
         }
     }
@@ -325,6 +329,10 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
     // 如果没有找到object_output，使用默认值
     if object_output.is_empty() {
         object_output = "./".to_string();
+    }
+    // 如果没有找到output，使用默认值
+    if output.is_empty() {
+        output = format!("{}.elf", project_name);
     }
 
     Ok(ProjectInfo {
@@ -338,6 +346,7 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
         postbuild_commands,
         march_info,
         object_output,
+        output,
         linker_options,
         linker_libs,
         linker_lib_dirs,
