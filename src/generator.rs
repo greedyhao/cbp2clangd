@@ -281,8 +281,8 @@ pub fn generate_ninja_build(
     ninja_content.push_str(&format!("  command = {} $flags $in -o $out\n", linker));
     ninja_content.push_str("\n");
 
-    // 构建对象文件列表
-    let mut obj_files = Vec::new();
+    // 构建对象文件列表，分为普通对象文件和特殊对象文件
+    let mut regular_obj_files = Vec::new();
     
     // 处理普通源文件
     for src in &project_info.source_files {
@@ -303,10 +303,10 @@ pub fn generate_ninja_build(
                 .join(format!("{}.o", src_stem.to_string_lossy()));
             full_path.to_string_lossy().to_string()
         };
-        obj_files.push(obj_name);
+        regular_obj_files.push(obj_name);
     }
     
-    // 处理特殊文件
+    // 处理特殊文件（只编译，不链接）
     for special_file in &project_info.special_files {
         // 解析构建命令中的目标文件名
         let mut processed_cmd = special_file.build_command.clone();
@@ -335,9 +335,6 @@ pub fn generate_ninja_build(
             format!("{}{}.o", project_info.object_output, src_stem.to_string_lossy())
         };
         
-        // 添加到对象文件列表
-        obj_files.push(output_file.to_string());
-        
         // 生成特殊文件的构建规则
         let rule_name = format!("special_{}", special_file.filename.replace(".", "_").replace("/", "_").replace("\\", "_"));
         ninja_content.push_str(&format!("rule {}\n", rule_name));
@@ -350,13 +347,13 @@ pub fn generate_ninja_build(
     }
 
     // 构建部分 - 普通源文件
-    for (src, obj) in project_info.source_files.iter().zip(obj_files.iter().take(project_info.source_files.len())) {
+    for (src, obj) in project_info.source_files.iter().zip(regular_obj_files.iter()) {
         ninja_content.push_str(&format!("build {}: cc {}\n", obj, src));
         ninja_content.push_str(&format!("  flags = {}\n", base_flags.join(" ")));
         ninja_content.push_str("\n");
     }
 
-    // 链接目标
+    // 链接目标 - 只使用普通对象文件，不包含特殊文件
     let project_name = project_dir
         .file_name()
         .unwrap_or_else(|| std::ffi::OsStr::new("output"))
@@ -377,7 +374,7 @@ pub fn generate_ninja_build(
         link_flags.push(lib.clone());
     }
     
-    ninja_content.push_str(&format!("build {}: link {}\n", target_name, obj_files.join(" ")));
+    ninja_content.push_str(&format!("build {}: link {}\n", target_name, regular_obj_files.join(" ")));
     if !link_flags.is_empty() {
         ninja_content.push_str(&format!("  flags = {}\n", link_flags.join(" ")));
     }
