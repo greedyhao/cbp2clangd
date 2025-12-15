@@ -1,6 +1,7 @@
 use crate::models::MarchInfo;
 use roxmltree::Document;
 use std::collections::HashSet;
+use std::path::Path;
 
 /// 项目信息结构
 pub struct ProjectInfo {
@@ -115,7 +116,22 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
                 linker_options.push(opt.to_string());
             }
             if let Some(lib) = add.attribute("library") {
-                linker_libs.push(format!("-l{}", lib));
+                // 检查是否是路径（包含/或\）
+                let lib_path = Path::new(lib);
+                if lib_path.has_root() || lib.contains("/") || lib.contains("\\") {
+                    // 带路径的库，直接使用完整路径
+                    linker_libs.push(lib.to_string());
+                } else {
+                    // 不带路径的库，处理前缀
+                    let processed_lib = if lib.starts_with("lib") {
+                        // 去掉lib前缀，添加-l
+                        format!("-l{}", &lib[3..])
+                    } else {
+                        // 直接添加-l
+                        format!("-l{}", lib)
+                    };
+                    linker_libs.push(processed_lib);
+                }
             }
             if let Some(dir) = add.attribute("directory") {
                 linker_lib_dirs.push(format!("-L{}", dir));
