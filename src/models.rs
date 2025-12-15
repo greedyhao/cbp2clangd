@@ -12,6 +12,7 @@ pub struct CompileCommand {
 #[derive(Debug, Default)]
 pub struct SpecialFileBuildInfo {
     pub filename: String,           // 文件名
+    #[allow(dead_code)]
     pub compiler_id: String,        // 编译器ID
     pub build_command: String,      // 构建命令模板
 }

@@ -307,6 +307,7 @@ pub fn generate_ninja_build(
     }
     
     // 处理特殊文件（只编译，不链接）
+    let mut special_output_files = Vec::new();
     for special_file in &project_info.special_files {
         // 解析构建命令中的目标文件名
         let mut processed_cmd = special_file.build_command.clone();
@@ -334,6 +335,9 @@ pub fn generate_ninja_build(
             let src_stem = src_path.file_stem().unwrap_or_else(|| std::ffi::OsStr::new(""));
             format!("{}{}.o", project_info.object_output, src_stem.to_string_lossy())
         };
+        
+        // 添加到特殊输出文件列表
+        special_output_files.push(output_file.clone());
         
         // 生成特殊文件的构建规则
         let rule_name = format!("special_{}", special_file.filename.replace(".", "_").replace("/", "_").replace("\\", "_"));
@@ -374,7 +378,15 @@ pub fn generate_ninja_build(
         link_flags.push(lib.clone());
     }
     
-    ninja_content.push_str(&format!("build {}: link {}\n", target_name, regular_obj_files.join(" ")));
+    // 生成主目标的构建规则，确保特殊文件被编译但不被链接
+    if special_output_files.is_empty() {
+        // 没有特殊文件，直接使用普通对象文件
+        ninja_content.push_str(&format!("build {}: link {}\n", target_name, regular_obj_files.join(" ")));
+    } else {
+        // 有特殊文件，将它们作为隐式依赖，确保被编译但不被链接
+        ninja_content.push_str(&format!("build {}: link {} | {}\n", target_name, regular_obj_files.join(" "), special_output_files.join(" ")));
+    }
+    
     if !link_flags.is_empty() {
         ninja_content.push_str(&format!("  flags = {}\n", link_flags.join(" ")));
     }
@@ -391,7 +403,7 @@ pub fn generate_ninja_build(
 pub fn generate_build_script(
     project_info: &ProjectInfo,
     toolchain: &ToolchainConfig,
-    project_dir: &Path,
+    _project_dir: &Path,
 ) -> String {
     debug_println!("[DEBUG generator] Starting to generate build script...");
     
