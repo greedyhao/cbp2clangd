@@ -422,9 +422,11 @@ pub fn generate_build_script(
     if !project_info.prebuild_commands.is_empty() {
         script_content.push_str("rem Prebuild commands\n");
         for cmd in &project_info.prebuild_commands {
+            script_content.push_str("pushd %~dp0\n");
             // 替换 $(PROJECT_NAME) 变量
             let processed_cmd = cmd.replace("$(PROJECT_NAME)", &project_info.project_name);
-            script_content.push_str(&format!("{}\n", processed_cmd));
+            script_content.push_str(&format!("call {}\n", processed_cmd));
+            script_content.push_str("popd\n");
         }
         script_content.push_str("\n");
     }
@@ -439,9 +441,11 @@ pub fn generate_build_script(
     if !project_info.postbuild_commands.is_empty() {
         script_content.push_str("rem Postbuild commands\n");
         for cmd in &project_info.postbuild_commands {
+            script_content.push_str("pushd %~dp0\n");
             // 替换 $(PROJECT_NAME) 变量
             let processed_cmd = cmd.replace("$(PROJECT_NAME)", &project_info.project_name);
-            script_content.push_str(&format!("{}\n", processed_cmd));
+            script_content.push_str(&format!("call {}\n", processed_cmd));
+            script_content.push_str("popd\n");
         }
         script_content.push_str("\n");
     }
@@ -449,7 +453,8 @@ pub fn generate_build_script(
     // 5. 添加完成信息
     script_content.push_str("rem Build completed successfully\n");
     script_content.push_str("echo Build completed successfully\n");
-    
+    script_content.push_str("\n");
+
     debug_println!("[DEBUG generator] Successfully generated build script content");
     script_content
 }
