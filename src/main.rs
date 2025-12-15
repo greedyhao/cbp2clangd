@@ -175,7 +175,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ninja_content = generator::generate_ninja_build(&project_info, &project_dir, &toolchain)?;
 
     debug_println!("[DEBUG] Preparing ninja build file path...");
-    let ninja_path = normalized_output_dir.join("build.ninja");
+    // 根据需求，build.ninja 必须放在 cbp 工程同一路径
+    let ninja_path = project_dir.join("build.ninja");
     debug_println!("[DEBUG] Final ninja build file path: {}", ninja_path.display());
 
     debug_println!(
