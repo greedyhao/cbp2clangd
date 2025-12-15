@@ -283,28 +283,38 @@ pub fn generate_ninja_build(
     // 处理普通源文件
     for src in &project_info.source_files {
         let src_path = Path::new(src);
-        let src_stem = src_path
-            .file_stem()
-            .unwrap_or_else(|| std::ffi::OsStr::new(""));
 
-        // 提取源文件的目录结构
-        let src_dir = src_path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new(""));
-
-        // 构建对象文件的完整路径：object_output + 源文件目录 + 源文件名.o
-        let obj_name = if src_dir == std::path::Path::new("") {
-            // 源文件在根目录，直接使用文件名
-            format!(
-                "{}{}.o",
-                project_info.object_output,
-                src_stem.to_string_lossy()
-            )
-        } else {
-            // 源文件在子目录，保留目录结构
-            let full_path = Path::new(&project_info.object_output)
-                .join(src_dir)
-                .join(format!("{}.o", src_stem.to_string_lossy()));
+        // 构建对象文件的完整路径：object_output + 源文件名.o
+        // 注意：这里不直接使用src的父目录，而是从src的完整路径中移除..，确保对象文件在output目录内
+        let obj_name = {
+            // 从src路径中移除父目录引用，确保对象文件在output目录内
+            let mut normalized_path = Vec::new();
+            for component in src_path.components() {
+                match component {
+                    std::path::Component::ParentDir => {
+                        // 如果不是第一个组件，移除上一个组件
+                        if !normalized_path.is_empty() {
+                            normalized_path.pop();
+                        }
+                    }
+                    std::path::Component::Normal(component) => {
+                        normalized_path.push(component);
+                    }
+                    _ => {}
+                }
+            }
+            
+            // 构建规范化后的路径
+            let mut full_path = Path::new(&project_info.object_output).to_path_buf();
+            for component in normalized_path {
+                full_path.push(component);
+            }
+            // 替换文件名后缀为.o
+            if let Some(file_name) = full_path.file_name() {
+                let file_name_str = file_name.to_string_lossy().to_string();
+                let stem = file_name_str.split('.').next().unwrap_or("");
+                full_path.set_file_name(format!("{}.o", stem));
+            }
             full_path.to_string_lossy().to_string()
         };
         regular_obj_files.push(obj_name);
@@ -336,14 +346,33 @@ pub fn generate_ninja_build(
         } else {
             // 如果没有找到-o选项，使用默认的输出文件名
             let src_path = Path::new(&special_file.filename);
-            let src_stem = src_path
-                .file_stem()
-                .unwrap_or_else(|| std::ffi::OsStr::new(""));
-            format!(
-                "{}{}.o",
-                project_info.object_output,
-                src_stem.to_string_lossy()
-            )
+            
+            // 构建规范化的对象文件路径，确保在output目录内
+            let mut normalized_path = Vec::new();
+            for component in src_path.components() {
+                match component {
+                    std::path::Component::ParentDir => {
+                        if !normalized_path.is_empty() {
+                            normalized_path.pop();
+                        }
+                    }
+                    std::path::Component::Normal(component) => {
+                        normalized_path.push(component);
+                    }
+                    _ => {}
+                }
+            }
+            
+            let mut full_path = Path::new(&project_info.object_output).to_path_buf();
+            for component in normalized_path {
+                full_path.push(component);
+            }
+            if let Some(file_name) = full_path.file_name() {
+                let file_name_str = file_name.to_string_lossy().to_string();
+                let stem = file_name_str.split('.').next().unwrap_or("");
+                full_path.set_file_name(format!("{}.o", stem));
+            }
+            full_path.to_string_lossy().to_string()
         };
 
         // 添加到特殊输出文件列表
