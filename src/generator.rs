@@ -1,7 +1,8 @@
 use crate::config::ToolchainConfig;
 use crate::models::CompileCommand;
 use crate::parser::ProjectInfo;
-use crate::utils::{debug_println, get_short_path};
+use crate::debug_println;
+use crate::utils::get_short_path;
 use std::path::Path;
 
 /// 生成clangd配置文件内容

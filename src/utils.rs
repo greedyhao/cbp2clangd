@@ -25,16 +25,14 @@ pub fn is_debug_mode() -> bool {
 }
 
 /// 创建一个条件打印宏，只有在调试模式下才会打印
+#[macro_export]
 macro_rules! debug_println {
     ($($arg:tt)*) => {
-        if crate::utils::is_debug_mode() {
+        if $crate::is_debug_mode() {
             println!($($arg)*);
         }
     };
 }
-
-// 导出宏供其他模块使用
-pub(crate) use debug_println;
 
 /// 将路径转换为Windows 8.3短文件名格式
 /// 如果路径不包含空格或转换失败，则返回原始路径

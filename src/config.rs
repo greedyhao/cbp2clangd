@@ -1,4 +1,4 @@
-use crate::utils::debug_println;
+use crate::debug_println;
 
 #[derive(Debug, Clone)]
 pub struct ToolchainConfig {

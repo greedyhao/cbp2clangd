@@ -1,14 +1,7 @@
-mod cli;
-mod config;
-mod generator;
-mod models;
-mod parser;
-mod utils;
-
 use std::env;
 use std::fs;
 
-use utils::{debug_println, set_debug_mode};
+use cbp2clangd::{debug_println, generate_build_script, generate_clangd_config, generate_compile_commands, generate_ninja_build, parse_args, parse_cbp_file, set_debug_mode, ToolchainConfig};
 
 // 项目版本信息
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -16,7 +9,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 解析命令行参数
     debug_println!("[DEBUG] Parsing command line arguments...");
-    let args = cli::parse_args()?;
+    let args = parse_args()?;
 
     // 设置调试模式
     set_debug_mode(args.debug);
@@ -83,7 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     debug_println!("[DEBUG] Parsing CBP file...");
-    let mut project_info = parser::parse_cbp_file(&xml_content)?;
+    let mut project_info = parse_cbp_file(&xml_content)?;
 
     // 使用命令行参数中的linker_type覆盖解析结果
     project_info.linker_type = args.linker_type;
@@ -93,13 +86,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "[DEBUG] Determining toolchain configuration for compiler: {}",
         project_info.compiler_id
     );
-    let toolchain = config::ToolchainConfig::from_compiler_id(&project_info.compiler_id)
+    let toolchain = ToolchainConfig::from_compiler_id(&project_info.compiler_id)
         .unwrap_or_else(|| {
             eprintln!(
                 "Warning: Unknown compiler '{}', falling back to v2",
                 project_info.compiler_id
             );
-            config::ToolchainConfig::from_compiler_id("riscv32-v2").unwrap()
+            ToolchainConfig::from_compiler_id("riscv32-v2").unwrap()
         });
     debug_println!("[DEBUG] Toolchain config created successfully");
 
@@ -137,7 +130,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 生成编译命令列表
     debug_println!("[DEBUG] Generating compile commands...");
     let compile_commands = 
-        generator::generate_compile_commands(&project_info, &project_dir, &toolchain);
+        generate_compile_commands(&project_info, &project_dir, &toolchain);
     debug_println!(
         "[DEBUG] Compile commands generated: {}",
         compile_commands.len()
@@ -197,7 +190,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 生成 .clangd 配置文件
     debug_println!("[DEBUG] Generating .clangd config content...");
-    let clangd_content = generator::generate_clangd_config(&project_info, &toolchain)?;
+    let clangd_content = generate_clangd_config(&project_info, &toolchain)?;
 
     debug_println!("[DEBUG] Preparing .clangd file path...");
 
@@ -214,7 +207,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 生成 ninja 构建文件
     debug_println!("[DEBUG] Generating ninja build content...");
-    let ninja_content = generator::generate_ninja_build(&project_info, &project_dir, &toolchain)?;
+    let ninja_content = generate_ninja_build(&project_info, &project_dir, &toolchain)?;
 
     debug_println!("[DEBUG] Preparing ninja build file path...");
     // 根据需求，build.ninja 必须放在 cbp 工程同一路径
@@ -234,7 +227,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 生成构建脚本文件
     debug_println!("[DEBUG] Generating build script...");
     let build_script_content = 
-        generator::generate_build_script(&project_info, &toolchain, &project_dir);
+        generate_build_script(&project_info, &toolchain, &project_dir);
     let build_script_path = project_dir.join("build.bat");
     debug_println!(
         "[DEBUG] Writing build script to: {}",
