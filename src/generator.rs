@@ -285,8 +285,22 @@ pub fn generate_ninja_build(
     let mut obj_files = Vec::new();
     for src in &project_info.source_files {
         let src_path = Path::new(src);
-        let src_name = src_path.file_stem().unwrap_or_else(|| std::ffi::OsStr::new(""));
-        let obj_name = format!("{}{}.o", project_info.object_output, src_name.to_string_lossy());
+        let src_stem = src_path.file_stem().unwrap_or_else(|| std::ffi::OsStr::new(""));
+        
+        // 提取源文件的目录结构
+        let src_dir = src_path.parent().unwrap_or_else(|| std::path::Path::new(""));
+        
+        // 构建对象文件的完整路径：object_output + 源文件目录 + 源文件名.o
+        let obj_name = if src_dir == std::path::Path::new("") {
+            // 源文件在根目录，直接使用文件名
+            format!("{}{}.o", project_info.object_output, src_stem.to_string_lossy())
+        } else {
+            // 源文件在子目录，保留目录结构
+            let full_path = Path::new(&project_info.object_output)
+                .join(src_dir)
+                .join(format!("{}.o", src_stem.to_string_lossy()));
+            full_path.to_string_lossy().to_string()
+        };
         obj_files.push(obj_name);
     }
 
