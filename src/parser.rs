@@ -1,4 +1,4 @@
-use crate::models::MarchInfo;
+use crate::models::{MarchInfo, SpecialFileBuildInfo};
 use roxmltree::Document;
 use std::collections::HashSet;
 use std::path::Path;
@@ -9,6 +9,7 @@ pub struct ProjectInfo {
     pub global_cflags: Vec<String>,
     pub include_dirs: Vec<String>,
     pub source_files: Vec<String>,
+    pub special_files: Vec<SpecialFileBuildInfo>,
     pub march_info: MarchInfo,
     pub object_output: String,
     pub linker_options: Vec<String>,
@@ -139,23 +140,63 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
         }
     }
 
-    // === 源文件 ===
+    // === 源文件和特殊文件 ===
     let mut source_files = Vec::new();
+    let mut special_files = Vec::new();
     let valid_exts: HashSet<&str> = ["c", "cpp", "C", "CPP"].iter().cloned().collect();
 
     for unit in project.children().filter(|n| n.tag_name().name() == "Unit") {
         if let Some(filename) = unit.attribute("filename") {
             let path = std::path::Path::new(filename);
-            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                if valid_exts.contains(ext) {
-                    source_files.push(filename.to_string());
+            let ext = path.extension().and_then(|e| e.to_str());
+            
+            // 检查是否是普通源文件
+            let is_regular_source = ext.map(|e| valid_exts.contains(e)).unwrap_or(false);
+            
+            // 检查是否有编译选项
+            let mut should_compile = false;
+            let mut build_commands = Vec::new();
+            
+            for option in unit.children().filter(|n| n.tag_name().name() == "Option") {
+                // 检查是否有compile="1"属性
+                if let Some(compile) = option.attribute("compile") {
+                    if compile == "1" {
+                        should_compile = true;
+                    }
+                }
+                
+                // 检查是否有buildCommand属性和compiler属性
+                if let (Some(compiler), Some(build_cmd)) = (option.attribute("compiler"), option.attribute("buildCommand")) {
+                    // 检查是否use="1"
+                    if option.attribute("use").unwrap_or("0") == "1" {
+                        build_commands.push((compiler.to_string(), build_cmd.to_string()));
+                    }
+                }
+            }
+            
+            if is_regular_source {
+                // 普通源文件，添加到source_files
+                source_files.push(filename.to_string());
+            } else if should_compile && !build_commands.is_empty() {
+                // 特殊文件，有编译选项和构建命令
+                // 查找匹配当前编译器的构建命令
+                let matching_build_cmd = build_commands.iter()
+                    .find(|(compiler, _)| compiler == &compiler_id)
+                    .or_else(|| build_commands.first());
+                
+                if let Some((compiler, build_cmd)) = matching_build_cmd {
+                    special_files.push(SpecialFileBuildInfo {
+                        filename: filename.to_string(),
+                        compiler_id: compiler.clone(),
+                        build_command: build_cmd.clone(),
+                    });
                 }
             }
         }
     }
 
-    if source_files.is_empty() {
-        return Err("No source files (.c/.cpp) found in project.".into());
+    if source_files.is_empty() && special_files.is_empty() {
+        return Err("No source files (.c/.cpp) or special files found in project.".into());
     }
 
     // === 解析object_output目录 ===
@@ -193,6 +234,7 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
         global_cflags,
         include_dirs,
         source_files,
+        special_files,
         march_info,
         object_output,
         linker_options,

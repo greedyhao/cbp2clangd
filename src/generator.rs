@@ -283,6 +283,8 @@ pub fn generate_ninja_build(
 
     // 构建对象文件列表
     let mut obj_files = Vec::new();
+    
+    // 处理普通源文件
     for src in &project_info.source_files {
         let src_path = Path::new(src);
         let src_stem = src_path.file_stem().unwrap_or_else(|| std::ffi::OsStr::new(""));
@@ -303,9 +305,51 @@ pub fn generate_ninja_build(
         };
         obj_files.push(obj_name);
     }
+    
+    // 处理特殊文件
+    for special_file in &project_info.special_files {
+        // 解析构建命令中的目标文件名
+        let mut processed_cmd = special_file.build_command.clone();
+        
+        // 替换变量
+        processed_cmd = processed_cmd.replace("$compiler", &compiler);
+        processed_cmd = processed_cmd.replace("$options", &base_flags.join(" "));
+        processed_cmd = processed_cmd.replace("$includes", &project_info.include_dirs.join(" "));
+        processed_cmd = processed_cmd.replace("$file", &special_file.filename);
+        processed_cmd = processed_cmd.replace("$(TARGET_OBJECT_DIR)", &project_info.object_output);
+        
+        // 提取输出文件名
+        let output_file = if let Some(output_pos) = processed_cmd.find("-o ") {
+            let rest = &processed_cmd[output_pos + 3..];
+            // 找到下一个空格或行尾
+            if let Some(space_pos) = rest.find(' ') {
+                rest[..space_pos].to_string()
+            } else {
+                rest.to_string()
+            }
+        } else {
+            // 如果没有找到-o选项，使用默认的输出文件名
+            let src_path = Path::new(&special_file.filename);
+            let src_stem = src_path.file_stem().unwrap_or_else(|| std::ffi::OsStr::new(""));
+            format!("{}{}.o", project_info.object_output, src_stem.to_string_lossy())
+        };
+        
+        // 添加到对象文件列表
+        obj_files.push(output_file.to_string());
+        
+        // 生成特殊文件的构建规则
+        let rule_name = format!("special_{}", special_file.filename.replace(".", "_").replace("/", "_").replace("\\", "_"));
+        ninja_content.push_str(&format!("rule {}\n", rule_name));
+        ninja_content.push_str(&format!("  command = {}\n", processed_cmd));
+        ninja_content.push_str("\n");
+        
+        // 生成构建规则
+        ninja_content.push_str(&format!("build {}: {} {}\n", output_file, rule_name, special_file.filename));
+        ninja_content.push_str("\n");
+    }
 
-    // 构建部分
-    for (src, obj) in project_info.source_files.iter().zip(obj_files.iter()) {
+    // 构建部分 - 普通源文件
+    for (src, obj) in project_info.source_files.iter().zip(obj_files.iter().take(project_info.source_files.len())) {
         ninja_content.push_str(&format!("build {}: cc {}\n", obj, src));
         ninja_content.push_str(&format!("  flags = {}\n", base_flags.join(" ")));
         ninja_content.push_str("\n");
