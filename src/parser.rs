@@ -85,6 +85,42 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
     let mut linker_lib_dirs = Vec::new();
     let mut prebuild_commands = Vec::new();
     let mut postbuild_commands = Vec::new();
+    
+    // 用于存储Build/Target/Linker中的库，按顺序保存
+    let mut build_target_linker_libs = Vec::new();
+    // 用于快速检查Build/Target/Linker中的库，避免Project/Linker添加重复的库
+    let mut build_target_lib_set = HashSet::new();
+
+    // 解析Build/Target/Linker节点，获取库信息
+    for build_node in project.children().filter(|n| n.tag_name().name() == "Build") {
+        for target_node in build_node.children().filter(|n| n.tag_name().name() == "Target") {
+            if let Some(linker_node) = target_node.children().find(|n| n.tag_name().name() == "Linker") {
+                for add in linker_node.children().filter(|n| n.tag_name().name() == "Add") {
+                    if let Some(lib) = add.attribute("library") {
+                        // 检查是否是路径（包含/或\）
+                        let lib_path = Path::new(lib);
+                        let processed_lib = if lib_path.has_root() || lib.contains("/") || lib.contains("\\") {
+                            // 带路径的库，直接使用完整路径
+                            lib.to_string()
+                        } else {
+                            // 不带路径的库，处理前缀
+                            if lib.starts_with("lib") {
+                                // 去掉lib前缀，添加-l
+                                format!("-l{}", &lib[3..])
+                            } else {
+                                // 直接添加-l
+                                format!("-l{}", lib)
+                            }
+                        };
+                        // 添加到Build/Target/Linker库列表
+                        build_target_linker_libs.push(processed_lib.clone());
+                        // 添加到集合用于去重
+                        build_target_lib_set.insert(processed_lib);
+                    }
+                }
+            }
+        }
+    }
 
     // 解析Compiler节点
     if let Some(compiler_node) = project
@@ -122,7 +158,7 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
         }
     }
 
-    // 解析Linker节点
+    // 解析Project/Linker节点
     if let Some(linker_node) = project.children().find(|n| n.tag_name().name() == "Linker") {
         for add in linker_node
             .children()
@@ -134,18 +170,21 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
             if let Some(lib) = add.attribute("library") {
                 // 检查是否是路径（包含/或\）
                 let lib_path = Path::new(lib);
-                if lib_path.has_root() || lib.contains("/") || lib.contains("\\") {
+                let processed_lib = if lib_path.has_root() || lib.contains("/") || lib.contains("\\") {
                     // 带路径的库，直接使用完整路径
-                    linker_libs.push(lib.to_string());
+                    lib.to_string()
                 } else {
                     // 不带路径的库，处理前缀
-                    let processed_lib = if lib.starts_with("lib") {
+                    if lib.starts_with("lib") {
                         // 去掉lib前缀，添加-l
                         format!("-l{}", &lib[3..])
                     } else {
                         // 直接添加-l
                         format!("-l{}", lib)
-                    };
+                    }
+                };
+                // 只有当Build/Target/Linker中没有这个库时，才添加到Project/Linker库列表
+                if !build_target_lib_set.contains(&processed_lib) {
                     linker_libs.push(processed_lib);
                 }
             }
@@ -154,6 +193,9 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
             }
         }
     }
+    
+    // 合并Project/Linker库和Build/Target/Linker库，Build/Target/Linker库放最后
+    linker_libs = [linker_libs, build_target_linker_libs].concat();
 
     // 解析ExtraCommands节点
     if let Some(extra_commands_node) = project
