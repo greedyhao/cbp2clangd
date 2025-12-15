@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let xml_content = fs::read_to_string(cbp_path)?;
     debug_println!("[DEBUG] Parsing CBP file...");
     let mut project_info = parser::parse_cbp_file(&xml_content)?;
-    
+
     // 使用命令行参数中的linker_type覆盖解析结果
     project_info.linker_type = args.linker_type;
 
@@ -181,7 +181,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     debug_println!("[DEBUG] Preparing ninja build file path...");
     // 根据需求，build.ninja 必须放在 cbp 工程同一路径
     let ninja_path = project_dir.join("build.ninja");
-    debug_println!("[DEBUG] Final ninja build file path: {}", ninja_path.display());
+    debug_println!(
+        "[DEBUG] Final ninja build file path: {}",
+        ninja_path.display()
+    );
 
     debug_println!(
         "[DEBUG] Writing ninja build file to: {}",
@@ -189,12 +192,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     fs::write(&ninja_path, ninja_content)?;
     println!("Generated {}", ninja_path.display());
-    
+
     // 生成构建脚本文件
     debug_println!("[DEBUG] Generating build script...");
-    let build_script_content = generator::generate_build_script(&project_info, &toolchain, &project_dir);
+    let build_script_content =
+        generator::generate_build_script(&project_info, &toolchain, &project_dir);
     let build_script_path = project_dir.join("build.bat");
-    debug_println!("[DEBUG] Writing build script to: {}", build_script_path.display());
+    debug_println!(
+        "[DEBUG] Writing build script to: {}",
+        build_script_path.display()
+    );
     fs::write(&build_script_path, build_script_content)?;
     println!("Generated {}", build_script_path.display());
 

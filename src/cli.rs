@@ -19,7 +19,7 @@ pub fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     if let Some(pos) = args.iter().position(|arg| arg == "--debug") {
         args.remove(pos);
     }
-    
+
     // 检查并移除--linker/-l参数
     let mut linker_type = "gcc".to_string();
     if let Some(linker_pos) = args.iter().position(|arg| arg == "--linker" || arg == "-l") {
@@ -29,7 +29,10 @@ pub fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             args.remove(linker_pos);
         } else {
             eprintln!("Error: --linker/-l option requires an argument");
-            eprintln!("Usage: {} [--debug] [--linker <type>] <project.cbp> [output_dir]", args[0]);
+            eprintln!(
+                "Usage: {} [--debug] [--linker <type>] <project.cbp> [output_dir]",
+                args[0]
+            );
             std::process::exit(1);
         }
     }
@@ -47,7 +50,10 @@ pub fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
 
     // 检查是否有足够的参数
     if args.len() != 2 && args.len() != 3 {
-        eprintln!("Usage: {} [--debug] [--linker <type>] <project.cbp> [output_dir]", args[0]);
+        eprintln!(
+            "Usage: {} [--debug] [--linker <type>] <project.cbp> [output_dir]",
+            args[0]
+        );
         eprintln!(
             "       {} --version | -v    Show version information",
             args[0]

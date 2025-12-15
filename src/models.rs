@@ -11,10 +11,10 @@ pub struct CompileCommand {
 /// 特殊文件构建信息
 #[derive(Debug, Default)]
 pub struct SpecialFileBuildInfo {
-    pub filename: String,           // 文件名
+    pub filename: String, // 文件名
     #[allow(dead_code)]
-    pub compiler_id: String,        // 编译器ID
-    pub build_command: String,      // 构建命令模板
+    pub compiler_id: String, // 编译器ID
+    pub build_command: String, // 构建命令模板
 }
 
 /// RISC-V架构特性信息

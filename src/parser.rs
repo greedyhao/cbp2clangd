@@ -121,12 +121,9 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
             }
         }
     }
-    
+
     // 解析Linker节点
-    if let Some(linker_node) = project
-        .children()
-        .find(|n| n.tag_name().name() == "Linker")
-    {
+    if let Some(linker_node) = project.children().find(|n| n.tag_name().name() == "Linker") {
         for add in linker_node
             .children()
             .filter(|n| n.tag_name().name() == "Add")
@@ -157,7 +154,7 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
             }
         }
     }
-    
+
     // 解析ExtraCommands节点
     if let Some(extra_commands_node) = project
         .children()
@@ -191,14 +188,14 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
         if let Some(filename) = unit.attribute("filename") {
             let path = std::path::Path::new(filename);
             let ext = path.extension().and_then(|e| e.to_str());
-            
+
             // 检查是否是普通源文件
             let is_regular_source = ext.map(|e| valid_exts.contains(e)).unwrap_or(false);
-            
+
             // 检查是否有编译选项
             let mut should_compile = false;
             let mut build_commands = Vec::new();
-            
+
             for option in unit.children().filter(|n| n.tag_name().name() == "Option") {
                 // 检查是否有compile="1"属性
                 if let Some(compile) = option.attribute("compile") {
@@ -206,29 +203,34 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
                         should_compile = true;
                     }
                 }
-                
+
                 // 检查是否有buildCommand属性和compiler属性
-                if let (Some(compiler), Some(build_cmd)) = (option.attribute("compiler"), option.attribute("buildCommand")) {
+                if let (Some(compiler), Some(build_cmd)) = (
+                    option.attribute("compiler"),
+                    option.attribute("buildCommand"),
+                ) {
                     // 检查是否use="1"且buildCommand不为空
                     if option.attribute("use").unwrap_or("0") == "1" {
                         let trimmed_build_cmd = build_cmd.trim();
                         if !trimmed_build_cmd.is_empty() {
-                            build_commands.push((compiler.to_string(), trimmed_build_cmd.to_string()));
+                            build_commands
+                                .push((compiler.to_string(), trimmed_build_cmd.to_string()));
                         }
                     }
                 }
             }
-            
+
             if is_regular_source {
                 // 普通源文件，添加到source_files
                 source_files.push(filename.to_string());
             } else if should_compile && !build_commands.is_empty() {
                 // 特殊文件，有编译选项和构建命令
                 // 查找匹配当前编译器的构建命令
-                let matching_build_cmd = build_commands.iter()
+                let matching_build_cmd = build_commands
+                    .iter()
                     .find(|(compiler, _)| compiler == &compiler_id)
                     .or_else(|| build_commands.first());
-                
+
                 if let Some((compiler, build_cmd)) = matching_build_cmd {
                     special_files.push(SpecialFileBuildInfo {
                         filename: filename.to_string(),
@@ -246,13 +248,22 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
 
     // === 解析object_output目录 ===
     let mut object_output = String::new();
-    
+
     // 查找Build节点
-    for build_node in project.children().filter(|n| n.tag_name().name() == "Build") {
+    for build_node in project
+        .children()
+        .filter(|n| n.tag_name().name() == "Build")
+    {
         // 查找Target节点
-        for target_node in build_node.children().filter(|n| n.tag_name().name() == "Target") {
+        for target_node in build_node
+            .children()
+            .filter(|n| n.tag_name().name() == "Target")
+        {
             // 查找带有object_output属性的Option节点
-            for option_node in target_node.children().filter(|n| n.tag_name().name() == "Option") {
+            for option_node in target_node
+                .children()
+                .filter(|n| n.tag_name().name() == "Option")
+            {
                 if let Some(obj_output) = option_node.attribute("object_output") {
                     object_output = obj_output.to_string();
                     break;
@@ -268,7 +279,7 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
             break;
         }
     }
-    
+
     // 如果没有找到object_output，使用默认值
     if object_output.is_empty() {
         object_output = "./".to_string();
