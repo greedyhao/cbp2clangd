@@ -317,6 +317,7 @@ pub fn generate_ninja_build(
         processed_cmd = processed_cmd.replace("$includes", &project_info.include_dirs.join(" "));
         processed_cmd = processed_cmd.replace("$file", &special_file.filename);
         processed_cmd = processed_cmd.replace("$(TARGET_OBJECT_DIR)", &project_info.object_output);
+        processed_cmd = processed_cmd.replace("$(TARGET_OUTPUT_DIR)", &project_info.object_output);
         
         // 提取输出文件名
         let output_file = if let Some(output_pos) = processed_cmd.find("-o ") {
