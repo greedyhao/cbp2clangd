@@ -170,6 +170,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     fs::write(&clangd_path, clangd_content)?;
     println!("Generated {}", clangd_path.display());
 
+    // 生成 ninja 构建文件
+    debug_println!("[DEBUG] Generating ninja build content...");
+    let ninja_content = generator::generate_ninja_build(&project_info, &project_dir, &toolchain)?;
+
+    debug_println!("[DEBUG] Preparing ninja build file path...");
+    let ninja_path = normalized_output_dir.join("build.ninja");
+    debug_println!("[DEBUG] Final ninja build file path: {}", ninja_path.display());
+
+    debug_println!(
+        "[DEBUG] Writing ninja build file to: {}",
+        ninja_path.display()
+    );
+    fs::write(&ninja_path, ninja_content)?;
+    println!("Generated {}", ninja_path.display());
+
     debug_println!("[DEBUG] Program completed successfully");
     Ok(())
 }
