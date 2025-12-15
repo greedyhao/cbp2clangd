@@ -167,9 +167,12 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
                 
                 // 检查是否有buildCommand属性和compiler属性
                 if let (Some(compiler), Some(build_cmd)) = (option.attribute("compiler"), option.attribute("buildCommand")) {
-                    // 检查是否use="1"
+                    // 检查是否use="1"且buildCommand不为空
                     if option.attribute("use").unwrap_or("0") == "1" {
-                        build_commands.push((compiler.to_string(), build_cmd.to_string()));
+                        let trimmed_build_cmd = build_cmd.trim();
+                        if !trimmed_build_cmd.is_empty() {
+                            build_commands.push((compiler.to_string(), trimmed_build_cmd.to_string()));
+                        }
                     }
                 }
             }
