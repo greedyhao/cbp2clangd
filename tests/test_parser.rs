@@ -38,3 +38,45 @@ fn test_parse_cbp_file() {
     assert_eq!(project_info.source_files.len(), 1);
     assert_eq!(project_info.source_files[0], "src/chatbot.c");
 }
+
+#[test]
+fn test_parse_target_compiler_macros() {
+    // 创建一个包含Target/Compiler/Add宏定义的XML内容
+    let xml_content = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_project_file>
+    <FileVersion major="1" minor="6" />
+    <Project>
+        <Option title="TestProject" />
+        <Option compiler="riscv32-v2" />
+        <Build>
+            <Target title="Debug">
+                <Compiler>
+                    <Add option="-DLE_BIS_EN=1" />
+                    <Add option="-DLE_CIS_EN=1" />
+                </Compiler>
+            </Target>
+        </Build>
+        <Unit filename="main.c">
+            <Option compiler="riscv32-v2" />
+        </Unit>
+    </Project>
+</CodeBlocks_project_file>"#;
+
+    let result = parse_cbp_file(xml_content);
+    assert!(result.is_ok());
+    let project_info = result.unwrap();
+    
+    // 验证项目基本信息
+    assert_eq!(project_info.project_name, "TestProject");
+    assert_eq!(project_info.compiler_id, "riscv32-v2");
+    
+    // 验证宏定义是否被正确提取
+    assert!(project_info.global_cflags.contains(&"-DLE_BIS_EN=1".to_string()), 
+            "应该包含宏定义 -DLE_BIS_EN=1");
+    assert!(project_info.global_cflags.contains(&"-DLE_CIS_EN=1".to_string()), 
+            "应该包含宏定义 -DLE_CIS_EN=1");
+    
+    // 验证全局编译选项数量
+    assert_eq!(project_info.global_cflags.len(), 2, 
+               "全局编译选项数量应该为2");
+}

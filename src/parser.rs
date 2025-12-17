@@ -92,7 +92,7 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
     // 用于快速检查Build/Target/Linker中的库，避免Project/Linker添加重复的库
     let mut build_target_lib_set = HashSet::new();
 
-    // 解析Build/Target/Linker节点，获取库信息
+    // 解析Build/Target节点，获取库信息和宏定义
     for build_node in project
         .children()
         .filter(|n| n.tag_name().name() == "Build")
@@ -101,6 +101,7 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
             .children()
             .filter(|n| n.tag_name().name() == "Target")
         {
+            // 处理Target下的Linker节点，获取库信息
             if let Some(linker_node) = target_node
                 .children()
                 .find(|n| n.tag_name().name() == "Linker")
@@ -130,6 +131,42 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
                         build_target_linker_libs.push(processed_lib.clone());
                         // 添加到集合用于去重
                         build_target_lib_set.insert(processed_lib);
+                    }
+                }
+            }
+
+            // 处理Target下的Compiler节点，获取宏定义和编译选项
+            if let Some(compiler_node) = target_node
+                .children()
+                .find(|n| n.tag_name().name() == "Compiler")
+            {
+                for add in compiler_node
+                    .children()
+                    .filter(|n| n.tag_name().name() == "Add")
+                {
+                    if let Some(opt) = add.attribute("option") {
+                        let opt_str = opt.to_string();
+                        global_cflags.push(opt_str.clone());
+
+                        // 检测并解析-march=指令
+                        if opt_str.starts_with("-march=") {
+                            let march_value = opt_str.trim_start_matches("-march=");
+                            march_info.full_march = opt_str.clone();
+
+                            // 尝试分离基础部分和自定义扩展
+                            // 标准RISC-V扩展通常是a, c, d, e, f, g, h, i, m, p, v等单个字母
+                            // 自定义扩展通常以x开头，后面跟着更多字符
+                            if let Some(x_index) = march_value.find('x') {
+                                let base_part = &march_value[0..x_index];
+                                if !base_part.is_empty() {
+                                    march_info.base_march = Some(format!("-march={}", base_part));
+                                    march_info.has_custom_extension = true;
+                                }
+                            }
+                        }
+                    }
+                    if let Some(dir) = add.attribute("directory") {
+                        include_dirs.push(format!("-I{}", dir));
                     }
                 }
             }

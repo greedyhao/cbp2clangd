@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_project_file>
+	<FileVersion major="1" minor="6" />
+	<Project>
+		<Option title="TestProject" />
+		<Option compiler="riscv32-v2" />
+		<Build>
+			<Target title="Debug">
+				<Compiler>
+					<Add option="-DLE_BIS_EN=1" />
+					<Add option="-DLE_CIS_EN=1" />
+				</Compiler>
+			</Target>
+		</Build>
+		<Unit filename="main.c">
+			<Option compiler="riscv32-v2" />
+		</Unit>
+	</Project>
+</CodeBlocks_project_file>

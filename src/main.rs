@@ -227,7 +227,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 生成构建脚本文件
     debug_println!("[DEBUG] Generating build script...");
     let build_script_content = 
-        generate_build_script(&project_info, &toolchain, &project_dir);
+        generate_build_script(&project_info, &toolchain, &project_dir, args.ninja_path.as_deref());
     let build_script_path = project_dir.join("build.bat");
     debug_println!(
         "[DEBUG] Writing build script to: {}",
