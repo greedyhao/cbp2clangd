@@ -101,7 +101,7 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
             .children()
             .filter(|n| n.tag_name().name() == "Target")
         {
-            // 处理Target下的Linker节点，获取库信息
+            // 处理Target下的Linker节点，获取库信息和库目录
             if let Some(linker_node) = target_node
                 .children()
                 .find(|n| n.tag_name().name() == "Linker")
@@ -131,6 +131,10 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
                         build_target_linker_libs.push(processed_lib.clone());
                         // 添加到集合用于去重
                         build_target_lib_set.insert(processed_lib);
+                    }
+                    if let Some(dir) = add.attribute("directory") {
+                        // 处理链接库目录，添加-L前缀
+                        linker_lib_dirs.push(format!("-L{}", dir));
                     }
                 }
             }

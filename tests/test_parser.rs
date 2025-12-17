@@ -80,3 +80,39 @@ fn test_parse_target_compiler_macros() {
     assert_eq!(project_info.global_cflags.len(), 2, 
                "全局编译选项数量应该为2");
 }
+
+#[test]
+fn test_parse_target_linker_add_directory() {
+    // 创建一个包含Build/Target/Linker/Add directory的XML内容
+    let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<CodeBlocks_project_file>
+    <FileVersion major="1" minor="6" />
+    <Project>
+        <Option title="Test" />
+        <Build>
+            <Target title="Debug">
+                <Linker>
+                    <Add library="libnet" />
+                    <Add directory="../../platform/libs/net" />
+                </Linker>
+            </Target>
+        </Build>
+        <Unit filename="main.c" />
+    </Project>
+</CodeBlocks_project_file>"#;
+
+    let result = parse_cbp_file(xml_content);
+    assert!(result.is_ok());
+    let project_info = result.unwrap();
+    
+    // 验证项目基本信息
+    assert_eq!(project_info.project_name, "Test");
+    
+    // 验证是否正确解析了Build/Target/Linker/Add directory
+    assert!(project_info.linker_lib_dirs.contains(&"-L../../platform/libs/net".to_string()),
+            "应该包含链接库目录 -L../../platform/libs/net");
+    
+    // 验证链接库是否正确解析
+    assert!(project_info.linker_libs.contains(&"-lnet".to_string()),
+            "应该包含链接库 -lnet");
+}

@@ -37,18 +37,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 测试模式：使用内置的XML内容
     let xml_content = if args.test_mode {
-        // 内置的测试XML内容，包含静态库输出
+        // 内置的测试XML内容，包含动态库输出和Build/Target/Linker/Add directory
         String::from(r#"<?xml version="1.0" encoding="UTF-8"?>
 <CodeBlocks_project_file>
     <FileVersion major="1" minor="6" />
     <Project>
-        <Option title="libchatbot" />
+        <Option title="chatbot" />
         <Build>
             <Target title="Debug">
-                <Option output="Output/bin/chatbot.a" prefix_auto="1" extension_auto="0" />
+                <Option output="Output/bin/chatbot.elf" prefix_auto="1" extension_auto="0" />
                 <Option object_output="Output/obj/Debug" />
                 <Linker>
                     <Add library="m" />
+                    <Add directory="../../platform/libs/net" />
                 </Linker>
             </Target>
         </Build>
