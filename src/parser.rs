@@ -280,7 +280,7 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
     // === 源文件和特殊文件 ===
     let mut source_files = Vec::new();
     let mut special_files = Vec::new();
-    let valid_exts: HashSet<&str> = ["c", "cpp", "C", "CPP"].iter().cloned().collect();
+    let valid_exts: HashSet<&str> = ["c", "cpp", "C", "CPP", "S", "s"].iter().cloned().collect();
 
     for unit in project.children().filter(|n| n.tag_name().name() == "Unit") {
         if let Some(filename) = unit.attribute("filename") {
