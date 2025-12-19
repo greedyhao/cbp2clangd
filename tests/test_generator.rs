@@ -1,5 +1,5 @@
+use cbp2clangd::{ToolchainConfig, generate_ninja_build, parse_cbp_file};
 use std::path::Path;
-use cbp2clangd::{generate_ninja_build, parse_cbp_file, ToolchainConfig};
 
 #[test]
 fn test_generate_ninja_build_for_static_lib() {
@@ -37,10 +37,10 @@ fn test_generate_ninja_build_for_static_lib() {
     let result = generate_ninja_build(&project_info, Path::new("."), &toolchain);
     assert!(result.is_ok());
     let ninja_content = result.unwrap();
-    
+
     // 打印生成的ninja内容，以便调试
     println!("Generated ninja content:\n{}", ninja_content);
-    
+
     // 检查生成的ninja内容是否包含预期的规则和目标
     assert!(ninja_content.contains("rule ar"));
     assert!(ninja_content.contains("libchatbot.a: ar"));
@@ -83,10 +83,10 @@ fn test_generate_ninja_build_for_executable() {
     let result = generate_ninja_build(&project_info, Path::new("."), &toolchain);
     assert!(result.is_ok());
     let ninja_content = result.unwrap();
-    
+
     // 打印生成的ninja内容，以便调试
     println!("Generated ninja content:\n{}", ninja_content);
-    
+
     // 检查生成的ninja内容是否包含预期的规则和目标
     assert!(ninja_content.contains("rule link"));
     assert!(ninja_content.contains("build Output/bin/chatbot.elf: link"));
@@ -124,14 +124,23 @@ fn test_generate_ninja_build_with_target_macros() {
     let result = generate_ninja_build(&project_info, Path::new("."), &toolchain);
     assert!(result.is_ok());
     let ninja_content = result.unwrap();
-    
+
     // 打印生成的ninja内容，以便调试
     println!("Generated ninja content with macros:\n{}", ninja_content);
-    
+
     // 检查生成的ninja内容是否包含预期的宏定义
-    assert!(ninja_content.contains("-DLE_BIS_EN=1"), "应该包含宏定义 -DLE_BIS_EN=1");
-    assert!(ninja_content.contains("-DLE_CIS_EN=1"), "应该包含宏定义 -DLE_CIS_EN=1");
-    
+    assert!(
+        ninja_content.contains("-DLE_BIS_EN=1"),
+        "应该包含宏定义 -DLE_BIS_EN=1"
+    );
+    assert!(
+        ninja_content.contains("-DLE_CIS_EN=1"),
+        "应该包含宏定义 -DLE_CIS_EN=1"
+    );
+
     // 检查宏定义是否被正确添加到编译规则中
-    assert!(ninja_content.contains("flags = -DLE_BIS_EN=1 -DLE_CIS_EN=1"), "宏定义应该被添加到flags中");
+    assert!(
+        ninja_content.contains("flags = -DLE_BIS_EN=1 -DLE_CIS_EN=1"),
+        "宏定义应该被添加到flags中"
+    );
 }

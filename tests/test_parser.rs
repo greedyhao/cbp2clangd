@@ -65,20 +65,31 @@ fn test_parse_target_compiler_macros() {
     let result = parse_cbp_file(xml_content);
     assert!(result.is_ok());
     let project_info = result.unwrap();
-    
+
     // 验证项目基本信息
     assert_eq!(project_info.project_name, "TestProject");
     assert_eq!(project_info.compiler_id, "riscv32-v2");
-    
+
     // 验证宏定义是否被正确提取
-    assert!(project_info.global_cflags.contains(&"-DLE_BIS_EN=1".to_string()), 
-            "应该包含宏定义 -DLE_BIS_EN=1");
-    assert!(project_info.global_cflags.contains(&"-DLE_CIS_EN=1".to_string()), 
-            "应该包含宏定义 -DLE_CIS_EN=1");
-    
+    assert!(
+        project_info
+            .global_cflags
+            .contains(&"-DLE_BIS_EN=1".to_string()),
+        "应该包含宏定义 -DLE_BIS_EN=1"
+    );
+    assert!(
+        project_info
+            .global_cflags
+            .contains(&"-DLE_CIS_EN=1".to_string()),
+        "应该包含宏定义 -DLE_CIS_EN=1"
+    );
+
     // 验证全局编译选项数量
-    assert_eq!(project_info.global_cflags.len(), 2, 
-               "全局编译选项数量应该为2");
+    assert_eq!(
+        project_info.global_cflags.len(),
+        2,
+        "全局编译选项数量应该为2"
+    );
 }
 
 #[test]
@@ -104,15 +115,21 @@ fn test_parse_target_linker_add_directory() {
     let result = parse_cbp_file(xml_content);
     assert!(result.is_ok());
     let project_info = result.unwrap();
-    
+
     // 验证项目基本信息
     assert_eq!(project_info.project_name, "Test");
-    
+
     // 验证是否正确解析了Build/Target/Linker/Add directory
-    assert!(project_info.linker_lib_dirs.contains(&"-L../../platform/libs/net".to_string()),
-            "应该包含链接库目录 -L../../platform/libs/net");
-    
+    assert!(
+        project_info
+            .linker_lib_dirs
+            .contains(&"-L../../platform/libs/net".to_string()),
+        "应该包含链接库目录 -L../../platform/libs/net"
+    );
+
     // 验证链接库是否正确解析
-    assert!(project_info.linker_libs.contains(&"-lnet".to_string()),
-            "应该包含链接库 -lnet");
+    assert!(
+        project_info.linker_libs.contains(&"-lnet".to_string()),
+        "应该包含链接库 -lnet"
+    );
 }

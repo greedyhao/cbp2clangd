@@ -1,7 +1,10 @@
 use std::env;
 use std::fs;
 
-use cbp2clangd::{debug_println, generate_build_script, generate_clangd_config, generate_compile_commands, generate_ninja_build, parse_args, parse_cbp_file, set_debug_mode, ToolchainConfig};
+use cbp2clangd::{
+    ToolchainConfig, debug_println, generate_build_script, generate_clangd_config,
+    generate_compile_commands, generate_ninja_build, parse_args, parse_cbp_file, set_debug_mode,
+};
 
 // 项目版本信息
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -38,7 +41,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 测试模式：使用内置的XML内容
     let xml_content = if args.test_mode {
         // 内置的测试XML内容，包含动态库输出和Build/Target/Linker/Add directory
-        String::from(r#"<?xml version="1.0" encoding="UTF-8"?>
+        String::from(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
 <CodeBlocks_project_file>
     <FileVersion major="1" minor="6" />
     <Project>
@@ -64,7 +68,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             <Option compile="1" />
         </Unit>
     </Project>
-</CodeBlocks_project_file>"#)
+</CodeBlocks_project_file>"#,
+        )
     } else {
         // 正常模式：读取文件内容
         debug_println!("[DEBUG] Checking if CBP file exists...");
@@ -87,8 +92,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "[DEBUG] Determining toolchain configuration for compiler: {}",
         project_info.compiler_id
     );
-    let toolchain = ToolchainConfig::from_compiler_id(&project_info.compiler_id)
-        .unwrap_or_else(|| {
+    let toolchain =
+        ToolchainConfig::from_compiler_id(&project_info.compiler_id).unwrap_or_else(|| {
             eprintln!(
                 "Warning: Unknown compiler '{}', falling back to v2",
                 project_info.compiler_id
@@ -130,8 +135,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 生成编译命令列表
     debug_println!("[DEBUG] Generating compile commands...");
-    let compile_commands = 
-        generate_compile_commands(&project_info, &project_dir, &toolchain);
+    let compile_commands = generate_compile_commands(&project_info, &project_dir, &toolchain);
     debug_println!(
         "[DEBUG] Compile commands generated: {}",
         compile_commands.len()
@@ -227,8 +231,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 生成构建脚本文件
     debug_println!("[DEBUG] Generating build script...");
-    let build_script_content = 
-        generate_build_script(&project_info, &toolchain, &project_dir, args.ninja_path.as_deref());
+    let build_script_content = generate_build_script(
+        &project_info,
+        &toolchain,
+        &project_dir,
+        args.ninja_path.as_deref(),
+    );
     let build_script_path = project_dir.join("build.bat");
     debug_println!(
         "[DEBUG] Writing build script to: {}",
