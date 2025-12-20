@@ -43,13 +43,15 @@
 ### 基本语法
 
 ```bash
-cbp2clangd [--debug] [--linker <type>] <cbp文件路径> [输出目录路径]
+cbp2clangd [--debug] [--test] [--linker <type>] [--ninja <path>] <cbp文件路径> [输出目录路径]
 ```
 
 ### 参数说明
 
 - `--debug`: 启用调试日志
+- `--test`: 启用测试模式，使用内置的 XML 内容
 - `--linker <type>` 或 `-l <type>`: 指定链接器类型（gcc 或 ld，默认为 gcc）
+- `--ninja <path>` 或 `-n <path>`: 指定自定义 ninja 可执行文件路径
 - `<cbp文件路径>`: Code::Blocks 项目文件（.cbp）的路径
 - `<输出目录路径>`: 生成配置文件的目标目录（通常是项目根目录）
 
@@ -57,6 +59,8 @@ cbp2clangd [--debug] [--linker <type>] <cbp文件路径> [输出目录路径]
 
 ```bash
 cbp2clangd --version
+# 或使用短选项
+cbp2clangd -v
 ```
 
 ### 使用示例

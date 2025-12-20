@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.7] - 2025-12-20
+### Changed
+- 更新 README 文档，添加缺失的命令行参数说明（--test, --ninja/-n）
+- 修改 ninja 路径的输入，从文件夹路径改为具体的 ninja 可执行文件路径
+
 ## [1.1.6] - 2025-12-19
 ### Fixed
 - 修复库文件删除后不生成问题
