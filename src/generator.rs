@@ -576,11 +576,6 @@ pub fn generate_build_script(
     script_content.push_str("rem Set toolchain path\n");
     script_content.push_str(&format!("set PATH={};%PATH%\n", toolchain_bin));
 
-    // 2. 如果提供了ninja路径，添加到PATH环境变量
-    if let Some(ninja_path) = ninja_path {
-        script_content.push_str("rem Set ninja path\n");
-        script_content.push_str(&format!("set PATH={};%PATH%\n", ninja_path));
-    }
     script_content.push_str("\n");
 
     // 2. 添加预构建命令
@@ -598,7 +593,11 @@ pub fn generate_build_script(
 
     // 3. 添加ninja构建命令
     script_content.push_str("rem Build project with ninja\n");
-    script_content.push_str("ninja -f build.ninja\n");
+    if let Some(ninja_path) = ninja_path {
+        script_content.push_str(&format!("{} -f build.ninja\n", ninja_path));
+    } else {
+        script_content.push_str("ninja -f build.ninja\n");
+    }
     script_content.push_str("if %errorlevel% neq 0 exit /b %errorlevel%\n");
     script_content.push_str("\n");
 

@@ -66,7 +66,7 @@ cbp2clangd --version
 将 app.cbp 项目转换为 clangd 配置，并输出到上级目录：
 
 ```bash
-cbp2clangd app.cbp ../../../
+cbp2clangd app.cbp ../
 ```
 
 #### 示例 2：指定使用 ld 链接器
@@ -121,7 +121,7 @@ cbp2clangd --debug app.cbp
 A: 请检查 Code::Blocks 项目文件格式是否正确，确保项目中包含有效的编译选项和源文件。
 
 ### Q: 支持哪些文件类型？
-A: 目前支持 .c、.cpp、.C、.CPP 后缀的源文件。
+A: 目前支持 .c .cpp .C .CPP .S .s 后缀的源文件。
 
 ### Q: 自定义扩展如何处理？
 A: 工具会尝试分离 RISC-V 编译标志中的基础部分和自定义扩展部分，以优化 clangd 的处理。
