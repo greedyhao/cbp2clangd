@@ -221,10 +221,81 @@ pub fn generate_compile_commands(
     compile_commands
 }
 
+/// 尝试解析库文件的实际路径
+///
+/// 1. 如果 lib 是绝对路径，直接检查
+/// 2. 如果 lib 是相对路径，基于 project_dir 检查
+/// 3. 如果 lib 是 -lname 格式，在 lib_dirs (基于 project_dir) 中搜索
+fn resolve_library_path(lib: &str, lib_dirs: &[String], root_dir: &Path) -> Option<String> {
+    // 1. 处理库名称
+    let (search_names, is_flag) = if lib.starts_with("-l") {
+        let name = &lib[2..];
+        // 如果是 -lfoo，则搜索 libfoo.a
+        (vec![format!("lib{}.a", name)], true)
+    } else {
+        // 如果直接是文件名
+        if lib.ends_with(".a") || lib.ends_with(".o") {
+            (vec![lib.to_string()], false)
+        } else {
+            (vec![lib.to_string(), format!("lib{}.a", lib)], false)
+        }
+    };
+
+    // 2. 如果不是 flag (-l)，直接检查文件路径
+    if !is_flag {
+        let p = Path::new(lib);
+        // 如果是绝对路径直接检查，如果是相对路径则拼接 root_dir
+        let full_p = if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            root_dir.join(p)
+        };
+        
+        if full_p.exists() {
+            // 返回规范化的路径或者相对路径，为了Ninja文件整洁，这里建议返回相对于root的路径或绝对路径
+            // 这里返回 canonicalize 后的路径以确保 Ninja 能绝对找到它
+            return full_p.canonicalize().ok().map(|p| p.to_string_lossy().to_string())
+                   .or_else(|| Some(full_p.to_string_lossy().to_string()));
+        }
+    }
+
+    // 3. 在库目录中搜索
+    for dir_flag in lib_dirs {
+        // 移除 -L 前缀
+        let raw_dir = if dir_flag.starts_with("-L") {
+            &dir_flag[2..]
+        } else {
+            dir_flag
+        };
+
+        let dir_path = Path::new(raw_dir);
+        
+        // 解析库目录的实际位置
+        let search_dir = if dir_path.is_absolute() {
+            dir_path.to_path_buf()
+        } else {
+            root_dir.join(dir_path)
+        };
+
+        // 在该目录下搜索库文件
+        for name in &search_names {
+            let full_path = search_dir.join(name);
+            if full_path.exists() {
+                debug_println!("[DEBUG generator] Found lib at: {}", full_path.display());
+                // 同样，优先返回规范化的绝对路径，防止路径中包含 .. 导致 Ninja 解析困惑
+                return full_path.canonicalize().ok().map(|p| p.to_string_lossy().to_string())
+                       .or_else(|| Some(full_path.to_string_lossy().to_string()));
+            }
+        }
+    }
+
+    None
+}
+
 /// 生成ninja构建文件内容
 pub fn generate_ninja_build(
     project_info: &ProjectInfo,
-    _project_dir: &Path,
+    project_dir: &Path,
     toolchain: &ToolchainConfig,
 ) -> Result<String, Box<dyn std::error::Error>> {
     debug_println!("[DEBUG generator] Starting to generate ninja build file...");
@@ -509,6 +580,25 @@ pub fn generate_ninja_build(
         // 构建链接标志，分为前导标志和库标志
         let mut pre_link_flags: Vec<String> = Vec::new();
         let mut lib_flags: Vec<String> = Vec::new();
+        
+        // 1. 解析库依赖，寻找实际路径
+        let mut resolved_lib_dependencies = Vec::new();
+
+        debug_println!("[DEBUG generator] Resolving library dependencies...");
+        debug_println!("[DEBUG generator] Search base dir: {}", project_dir.display()); // 添加调试日志
+        
+        for lib in &project_info.linker_libs {
+            // 将原始标志加入 lib_flags 传递给链接器命令
+            lib_flags.push(lib.clone());
+
+            // --- 修改点：传入 project_dir ---
+            if let Some(resolved_path) = resolve_library_path(lib, &project_info.linker_lib_dirs, project_dir) {
+                debug_println!("[DEBUG generator] Resolved library {} to {}", lib, resolved_path);
+                resolved_lib_dependencies.push(resolved_path);
+            } else {
+                debug_println!("[DEBUG generator] Could not resolve library path for {}", lib);
+            }
+        }
 
         // 添加链接器选项
         for opt in &project_info.linker_options {
@@ -520,10 +610,6 @@ pub fn generate_ninja_build(
         for lib_dir in &project_info.linker_lib_dirs {
             pre_link_flags.push(lib_dir.clone());
         }
-        // 添加链接库（-l选项）
-        for lib in &project_info.linker_libs {
-            lib_flags.push(lib.clone());
-        }
 
         // 修改链接规则，将库标志放在目标文件之后
         ninja_content.push_str("rule link\n");
@@ -533,23 +619,25 @@ pub fn generate_ninja_build(
         ));
         ninja_content.push_str("\n");
 
-        // 生成可执行文件构建规则
-        if special_output_files.is_empty() {
-            // 没有特殊文件，直接使用普通对象文件
-            ninja_content.push_str(&format!(
-                "build {}: link {}\n",
-                target_name,
-                regular_obj_files.join(" ")
-            ));
+        // 构建隐式依赖列表 (| 后面)
+        // 包含特殊对象文件和已解析的库文件
+        let mut implicit_deps = Vec::new();
+        implicit_deps.extend(special_output_files.iter().cloned());
+        implicit_deps.extend(resolved_lib_dependencies.iter().cloned());
+
+        let implicit_deps_str = if implicit_deps.is_empty() {
+            String::new()
         } else {
-            // 有特殊文件，将它们作为隐式依赖，确保被编译但不被链接
-            ninja_content.push_str(&format!(
-                "build {}: link {} | {}\n",
-                target_name,
-                regular_obj_files.join(" "),
-                special_output_files.join(" ")
-            ));
-        }
+            format!(" | {}", implicit_deps.join(" "))
+        };
+
+        // 生成可执行文件构建规则
+        ninja_content.push_str(&format!(
+            "build {}: link {}{}\n",
+            target_name,
+            regular_obj_files.join(" "),
+            implicit_deps_str
+        ));
 
         // 添加前导链接标志
         if !pre_link_flags.is_empty() {
