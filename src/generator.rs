@@ -25,8 +25,8 @@ pub fn generate_clangd_config(
 
     // 构建Add部分
     debug_println!("[DEBUG generator] Building Add flags section...");
-    let mut add_flags = vec!["-xc", "-target", "riscv32-unknown-elf"];
-    debug_println!("[DEBUG generator] Added base flags: -xc, -target, riscv32-unknown-elf");
+    let mut add_flags = vec!["-xc", "-target riscv32-unknown-elf"];
+    debug_println!("[DEBUG generator] Added base flags: -xc, -target riscv32-unknown-elf");
 
     // 添加include路径
     debug_println!("[DEBUG generator] Adding include paths to Add flags...");
@@ -37,6 +37,16 @@ pub fn generate_clangd_config(
     // 添加全局编译选项（包括宏定义）
     debug_println!("[DEBUG generator] Adding global_cflags to Add flags...");
     for flag in &project_info.global_cflags {
+        // 跳过-march选项，因为我们会单独处理
+        if flag.starts_with("-march=") {
+            debug_println!("[DEBUG generator] Skipping march flag from global_cflags: {}", flag);
+            continue;
+        }
+        // 跳过-mjump-tables-in-text选项，因为我们会将其添加到Remove部分
+        if flag == "-mjump-tables-in-text" {
+            debug_println!("[DEBUG generator] Skipping jump-tables flag from global_cflags: {}", flag);
+            continue;
+        }
         debug_println!("[DEBUG generator] Added global flag: {}", flag);
         add_flags.push(flag.as_str());
     }
@@ -48,6 +58,10 @@ pub fn generate_clangd_config(
             debug_println!("[DEBUG generator] Adding base march: {}", base_march);
             add_flags.push(base_march.as_str());
         }
+    } else if !project_info.march_info.full_march.is_empty() {
+        // 如果没有自定义扩展，添加完整的-march选项
+        debug_println!("[DEBUG generator] No custom extension, adding full march: {}", project_info.march_info.full_march);
+        add_flags.push(&project_info.march_info.full_march[..]);
     }
 
     // 构建Remove部分
