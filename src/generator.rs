@@ -3,7 +3,7 @@ use crate::debug_println;
 use crate::models::CompileCommand;
 use crate::parser::ProjectInfo;
 use crate::utils::get_short_path;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 /// 生成clangd配置文件内容
 pub fn generate_clangd_config(
@@ -221,11 +221,47 @@ pub fn generate_compile_commands(
     compile_commands
 }
 
-/// 尝试解析库文件的实际路径
-///
-/// 1. 如果 lib 是绝对路径，直接检查
-/// 2. 如果 lib 是相对路径，基于 project_dir 检查
-/// 3. 如果 lib 是 -lname 格式，在 lib_dirs (基于 project_dir) 中搜索
+/// 辅助函数：将路径分隔符统一为 Unix 风格 (/)，避免 Ninja 在 Windows 下的问题
+fn normalize_path(path: &Path) -> String {
+    path.to_string_lossy().replace("\\", "/")
+}
+
+/// 辅助函数：计算 target 相对于 base 的相对路径
+/// 如果无法计算（例如在 Windows 的不同磁盘上），则返回 None
+fn compute_relative_path(target: &Path, base: &Path) -> Option<PathBuf> {
+    let target_canon = target.canonicalize().ok()?;
+    let base_canon = base.canonicalize().ok()?;
+
+    let mut ita = target_canon.components();
+    let mut itb = base_canon.components();
+    let mut comps: Vec<Component> = vec![];
+
+    loop {
+        match (ita.next(), itb.next()) {
+            (None, None) => break,
+            (Some(a), None) => {
+                comps.push(a);
+                comps.extend(ita);
+                break;
+            }
+            (None, _) => comps.push(Component::ParentDir),
+            (Some(a), Some(b)) if a == b => continue, // 路径相同，继续
+            (Some(a), Some(_)) => {
+                // 路径出现分歧，base 需要回退 (ParentDir)，target 需要继续
+                comps.push(Component::ParentDir);
+                for _ in itb {
+                    comps.push(Component::ParentDir);
+                }
+                comps.push(a);
+                comps.extend(ita);
+                break;
+            }
+        }
+    }
+
+    Some(comps.iter().map(|c| c.as_os_str()).collect())
+}
+
 fn resolve_library_path(lib: &str, lib_dirs: &[String], root_dir: &Path) -> Option<String> {
     // 1. 处理库名称
     let (search_names, is_flag) = if lib.starts_with("-l") {
@@ -241,6 +277,19 @@ fn resolve_library_path(lib: &str, lib_dirs: &[String], root_dir: &Path) -> Opti
         }
     };
 
+    // 定义一个闭包来统一处理“找到路径后”的逻辑
+    // 目标：尝试转为相对路径，并统一使用 '/' 分隔符
+    let finalize_path = |found_path: PathBuf| -> String {
+        if let Some(rel) = compute_relative_path(&found_path, root_dir) {
+            normalize_path(&rel)
+        } else {
+            // 如果无法计算相对路径（如跨盘符），为了安全仍使用绝对路径
+            // 但替换分隔符为 '/' 以减少 Ninja 报错概率
+            normalize_path(&found_path)
+                    // 闭包内部逻辑继续...
+        }
+    };
+
     // 2. 如果不是 flag (-l)，直接检查文件路径
     if !is_flag {
         let p = Path::new(lib);
@@ -252,10 +301,7 @@ fn resolve_library_path(lib: &str, lib_dirs: &[String], root_dir: &Path) -> Opti
         };
         
         if full_p.exists() {
-            // 返回规范化的路径或者相对路径，为了Ninja文件整洁，这里建议返回相对于root的路径或绝对路径
-            // 这里返回 canonicalize 后的路径以确保 Ninja 能绝对找到它
-            return full_p.canonicalize().ok().map(|p| p.to_string_lossy().to_string())
-                   .or_else(|| Some(full_p.to_string_lossy().to_string()));
+            return Some(finalize_path(full_p));
         }
     }
 
@@ -282,9 +328,7 @@ fn resolve_library_path(lib: &str, lib_dirs: &[String], root_dir: &Path) -> Opti
             let full_path = search_dir.join(name);
             if full_path.exists() {
                 debug_println!("[DEBUG generator] Found lib at: {}", full_path.display());
-                // 同样，优先返回规范化的绝对路径，防止路径中包含 .. 导致 Ninja 解析困惑
-                return full_path.canonicalize().ok().map(|p| p.to_string_lossy().to_string())
-                       .or_else(|| Some(full_path.to_string_lossy().to_string()));
+                return Some(finalize_path(full_path));
             }
         }
     }
@@ -300,19 +344,24 @@ pub fn generate_ninja_build(
 ) -> Result<String, Box<dyn std::error::Error>> {
     debug_println!("[DEBUG generator] Starting to generate ninja build file...");
 
+    // 辅助函数：标准化工具路径 (使用 / 替换 \)
+    let clean_tool_path = |path: &str| -> String {
+        path.replace("\\", "/")
+    };
+
     // 使用工具链中的编译器路径，但如果路径不存在，使用占位符
     let compiler_path = toolchain.compiler_path();
     let compiler_exists = std::path::Path::new(&compiler_path).exists();
     let compiler = if compiler_exists {
         match get_short_path(&compiler_path) {
-            Ok(short_path) => short_path,
+            Ok(short_path) => clean_tool_path(&short_path),
             Err(e) => {
                 println!(
                     "[WARNING generator] Failed to get short path for compiler: {}. Using original path.",
                     e
                 );
-                let long_path = format!("\\?\\{}", compiler_path);
-                long_path
+                // 即使长路径也尝试替换分隔符
+                clean_tool_path(&compiler_path)
             }
         }
     } else {
@@ -328,14 +377,13 @@ pub fn generate_ninja_build(
     let linker_exists = std::path::Path::new(&linker_path).exists();
     let linker = if linker_exists {
         match get_short_path(&linker_path) {
-            Ok(short_path) => short_path,
+            Ok(short_path) => clean_tool_path(&short_path),
             Err(e) => {
                 println!(
                     "[WARNING generator] Failed to get short path for linker: {}. Using original path.",
                     e
                 );
-                let long_path = format!("\\?\\{}", linker_path);
-                long_path
+                clean_tool_path(&linker_path)
             }
         }
     } else {
@@ -350,20 +398,28 @@ pub fn generate_ninja_build(
         }
     };
 
+    // 提前计算常用的标准化路径，避免重复计算
+    let clean_obj_dir = normalize_path(Path::new(&project_info.object_output));
+
     // 构建基础编译器标志
-    let mut base_flags: Vec<&str> = Vec::new();
+    let mut base_flags: Vec<String> = Vec::new(); // Changed to String to own the normalized paths
     for flag in &project_info.global_cflags {
-        base_flags.push(flag.as_str());
+        base_flags.push(flag.clone());
     }
     for include in &project_info.include_dirs {
-        base_flags.push(include.as_str());
+        // 关键：Include 路径也需要标准化，避免 -I..\..\Path 这种混合风格
+        let p = Path::new(include);
+        base_flags.push(normalize_path(p));
     }
 
     // 规则部分
     let mut ninja_content = String::new();
     ninja_content.push_str("# Generated by cbp2clangd\n");
     ninja_content.push_str("\n");
+    
+    // Rule: CC
     ninja_content.push_str("rule cc\n");
+    // $in 和 $out 不需要引号，Ninja 处理空格主要靠转义，但这里假设路径无怪异字符
     ninja_content.push_str(&format!(
         "  command = {} $flags -MMD -MF $out.d -c $in -o $out\n",
         compiler
@@ -374,20 +430,20 @@ pub fn generate_ninja_build(
 
     // 构建对象文件列表，分为普通对象文件和特殊对象文件
     let mut regular_obj_files = Vec::new();
+    // 保存源文件路径和对应的对象文件路径的映射
+    let mut src_to_obj_map = Vec::new();
 
     // 处理普通源文件
     for src in &project_info.source_files {
         let src_path = Path::new(src);
 
         // 构建对象文件的完整路径：object_output + 源文件名.o
-        // 注意：这里不直接使用src的父目录，而是从src的完整路径中移除..，确保对象文件在output目录内
         let obj_name = {
             // 从src路径中移除父目录引用，确保对象文件在output目录内
             let mut normalized_path = Vec::new();
             for component in src_path.components() {
                 match component {
                     std::path::Component::ParentDir => {
-                        // 如果不是第一个组件，移除上一个组件
                         if !normalized_path.is_empty() {
                             normalized_path.pop();
                         }
@@ -399,7 +455,6 @@ pub fn generate_ninja_build(
                 }
             }
 
-            // 构建规范化后的路径
             let mut full_path = Path::new(&project_info.object_output).to_path_buf();
             for component in normalized_path {
                 full_path.push(component);
@@ -410,9 +465,15 @@ pub fn generate_ninja_build(
                 let stem = file_name_str.split('.').next().unwrap_or("");
                 full_path.set_file_name(format!("{}.o", stem));
             }
-            full_path.to_string_lossy().to_string()
+            // 关键：标准化对象文件路径
+            normalize_path(&full_path)
         };
-        regular_obj_files.push(obj_name);
+        
+        // 关键：标准化源文件路径
+        let clean_src = normalize_path(src_path);
+        
+        regular_obj_files.push(obj_name.clone());
+        src_to_obj_map.push((clean_src, obj_name));
     }
 
     // 处理特殊文件（只编译，不链接）
@@ -421,35 +482,39 @@ pub fn generate_ninja_build(
         // 解析构建命令中的目标文件名
         let mut processed_cmd = special_file.build_command.clone();
 
+        // 路径标准化处理
+        let clean_file_path = normalize_path(Path::new(&special_file.filename));
+        let clean_includes = project_info.include_dirs.iter()
+            .map(|p| normalize_path(Path::new(p)))
+            .collect::<Vec<_>>()
+            .join(" ");
+
         // 替换变量
         processed_cmd = processed_cmd.replace("$compiler", &compiler);
         processed_cmd = processed_cmd.replace("$options", &base_flags.join(" "));
-        processed_cmd = processed_cmd.replace("$includes", &project_info.include_dirs.join(" "));
-        processed_cmd = processed_cmd.replace("$file", &special_file.filename);
-        processed_cmd = processed_cmd.replace("$(TARGET_OBJECT_DIR)", &project_info.object_output);
-        processed_cmd = processed_cmd.replace("$(TARGET_OUTPUT_DIR)", &project_info.object_output);
+        processed_cmd = processed_cmd.replace("$includes", &clean_includes);
+        processed_cmd = processed_cmd.replace("$file", &clean_file_path);
+        processed_cmd = processed_cmd.replace("$(TARGET_OBJECT_DIR)", &clean_obj_dir);
+        processed_cmd = processed_cmd.replace("$(TARGET_OUTPUT_DIR)", &clean_obj_dir);
 
         // 提取输出文件名
         let output_file = if let Some(output_pos) = processed_cmd.find("-o ") {
             let rest = &processed_cmd[output_pos + 3..];
             // 找到下一个空格或行尾
-            if let Some(space_pos) = rest.find(' ') {
-                rest[..space_pos].to_string()
+            let raw_out = if let Some(space_pos) = rest.find(' ') {
+                &rest[..space_pos]
             } else {
-                rest.to_string()
-            }
+                rest
+            };
+            normalize_path(Path::new(raw_out))
         } else {
-            // 如果没有找到-o选项，使用默认的输出文件名
+            // 如果没有找到-o选项，使用默认的输出文件名逻辑
             let src_path = Path::new(&special_file.filename);
-
-            // 构建规范化的对象文件路径，确保在output目录内
             let mut normalized_path = Vec::new();
             for component in src_path.components() {
                 match component {
                     std::path::Component::ParentDir => {
-                        if !normalized_path.is_empty() {
-                            normalized_path.pop();
-                        }
+                        if !normalized_path.is_empty() { normalized_path.pop(); }
                     }
                     std::path::Component::Normal(component) => {
                         normalized_path.push(component);
@@ -467,13 +532,14 @@ pub fn generate_ninja_build(
                 let stem = file_name_str.split('.').next().unwrap_or("");
                 full_path.set_file_name(format!("{}.o", stem));
             }
-            full_path.to_string_lossy().to_string()
+            normalize_path(&full_path)
         };
 
         // 添加到特殊输出文件列表
         special_output_files.push(output_file.clone());
 
         // 生成特殊文件的构建规则
+        // 规则名称不能包含特殊字符
         let rule_name = format!(
             "special_{}",
             special_file
@@ -481,32 +547,30 @@ pub fn generate_ninja_build(
                 .replace(".", "_")
                 .replace("/", "_")
                 .replace("\\", "_")
+                .replace(":", "_") // 额外处理 Windows 盘符冒号
         );
         ninja_content.push_str(&format!("rule {}\n", rule_name));
-        ninja_content.push_str(&format!("  command = {}\n", processed_cmd));
+        ninja_content.push_str(&format!("  command = {}\n", processed_cmd)); // command 里的路径已经是 clean 的了
         ninja_content.push_str("\n");
 
         // 生成构建规则
         ninja_content.push_str(&format!(
             "build {}: {} {}\n",
-            output_file, rule_name, special_file.filename
+            output_file, rule_name, clean_file_path
         ));
         ninja_content.push_str("\n");
     }
 
     // 构建部分 - 普通源文件
-    for (src, obj) in project_info
-        .source_files
-        .iter()
-        .zip(regular_obj_files.iter())
-    {
+    // 使用预先计算好的映射
+    for (src, obj) in src_to_obj_map {
         ninja_content.push_str(&format!("build {}: cc {}\n", obj, src));
         ninja_content.push_str(&format!("  flags = {}\n", base_flags.join(" ")));
         ninja_content.push_str("\n");
     }
 
     // 链接目标 - 使用ProjectInfo中的output字段
-    let mut target_name = project_info.output.clone();
+    let mut target_name = normalize_path(Path::new(&project_info.output));
 
     // 检查是否为静态库目标（.a结尾）
     let is_static_lib = target_name.ends_with(".a");
@@ -520,64 +584,53 @@ pub fn generate_ninja_build(
                 let dir = target_path.parent().unwrap_or_else(|| Path::new("."));
                 let stem = file_name_str.strip_suffix(".a").unwrap_or(&file_name_str);
                 let new_file_name = format!("lib{}.a", stem);
-                target_name = dir.join(new_file_name).to_string_lossy().to_string();
+                target_name = normalize_path(&dir.join(new_file_name));
             }
         }
     }
 
-    // 生成主目标的构建规则，确保特殊文件被编译但不被链接
+    // 生成主目标的构建规则
     if is_static_lib {
         // 静态库目标
-        // 定义ar规则
         let ar_path = toolchain.ar_path();
         let ar_exists = std::path::Path::new(&ar_path).exists();
         let ar = if ar_exists {
             match get_short_path(&ar_path) {
-                Ok(short_path) => short_path,
+                Ok(short_path) => clean_tool_path(&short_path),
                 Err(e) => {
-                    println!(
-                        "[WARNING generator] Failed to get short path for ar: {}. Using original path.",
-                        e
-                    );
-                    let long_path = format!("\\?\\{}", ar_path);
-                    long_path
+                    println!("[WARNING generator] Failed to get short path for ar: {}. Using original.", e);
+                    clean_tool_path(&ar_path)
                 }
             }
         } else {
-            println!(
-                "[WARNING generator] Ar path {} does not exist. Using placeholder.",
-                ar_path
-            );
+            println!("[WARNING generator] Ar path {} does not exist. Using placeholder.", ar_path);
             "riscv32-elf-ar".to_string()
         };
 
         ninja_content.push_str("rule ar\n");
+        // Windows 下删除旧文件通常建议，但 Ninja 自身有处理，这里保留 rm/del 逻辑需谨慎
+        // 统一使用 cmd 语法在 Windows 上比较安全，或者直接覆盖
         ninja_content.push_str(&format!(
             "  command = cmd /c (if exist \"$out\" del /q \"$out\") & {} crs $out $in\n",
             ar
         ));
         ninja_content.push_str("\n");
 
-        // 生成静态库构建规则
-        if special_output_files.is_empty() {
-            // 没有特殊文件，直接使用普通对象文件
-            ninja_content.push_str(&format!(
-                "build {}: ar {}\n",
-                target_name,
-                regular_obj_files.join(" ")
-            ));
+        let deps_str = if special_output_files.is_empty() {
+             String::new()
         } else {
-            // 有特殊文件，将它们作为隐式依赖，确保被编译但不被链接
-            ninja_content.push_str(&format!(
-                "build {}: ar {} | {}\n",
-                target_name,
-                regular_obj_files.join(" "),
-                special_output_files.join(" ")
-            ));
-        }
+             format!(" | {}", special_output_files.join(" "))
+        };
+
+        ninja_content.push_str(&format!(
+            "build {}: ar {}{}\n",
+            target_name,
+            regular_obj_files.join(" "),
+            deps_str
+        ));
+
     } else {
         // 可执行文件目标
-        // 构建链接标志，分为前导标志和库标志
         let mut pre_link_flags: Vec<String> = Vec::new();
         let mut lib_flags: Vec<String> = Vec::new();
         
@@ -585,13 +638,13 @@ pub fn generate_ninja_build(
         let mut resolved_lib_dependencies = Vec::new();
 
         debug_println!("[DEBUG generator] Resolving library dependencies...");
-        debug_println!("[DEBUG generator] Search base dir: {}", project_dir.display()); // 添加调试日志
         
         for lib in &project_info.linker_libs {
-            // 将原始标志加入 lib_flags 传递给链接器命令
+            // 将原始标志加入 lib_flags 传递给链接器命令 (例如 -lm, -lfoo)
             lib_flags.push(lib.clone());
 
-            // --- 修改点：传入 project_dir ---
+            // 尝试解析库的物理路径，用于 Ninja 的依赖追踪 (implicit deps)
+            // 这里的 resolved_path 已经被 resolve_library_path 转换为相对路径且标准化了
             if let Some(resolved_path) = resolve_library_path(lib, &project_info.linker_lib_dirs, project_dir) {
                 debug_println!("[DEBUG generator] Resolved library {} to {}", lib, resolved_path);
                 resolved_lib_dependencies.push(resolved_path);
@@ -603,16 +656,27 @@ pub fn generate_ninja_build(
         // 添加链接器选项
         for opt in &project_info.linker_options {
             // 替换 $(TARGET_OBJECT_DIR) 为实际的 object_output 路径
-            let replaced_opt = opt.replace("$(TARGET_OBJECT_DIR)", &project_info.object_output);
+            // 注意：链接器选项里的路径最好也 standardized，但如果是纯 flag 不受影响
+            let replaced_opt = opt.replace("$(TARGET_OBJECT_DIR)", &clean_obj_dir);
             pre_link_flags.push(replaced_opt);
         }
         // 添加链接库目录（-L选项）
         for lib_dir in &project_info.linker_lib_dirs {
-            pre_link_flags.push(lib_dir.clone());
+            // 同样标准化路径
+            let clean_dir = normalize_path(Path::new(lib_dir));
+            // 如果 lib_dir 本身包含 -L，需要处理
+            if lib_dir.starts_with("-L") {
+                let path_part = &lib_dir[2..];
+                let clean_part = normalize_path(Path::new(path_part));
+                pre_link_flags.push(format!("-L{}", clean_part));
+            } else {
+                pre_link_flags.push(clean_dir);
+            }
         }
 
-        // 修改链接规则，将库标志放在目标文件之后
+        // 修改链接规则
         ninja_content.push_str("rule link\n");
+        // $in 是所有显式依赖（.o文件），$lib_flags 是 -lxxx
         ninja_content.push_str(&format!(
             "  command = {} $pre_flags $in $lib_flags -o $out\n",
             linker
@@ -644,7 +708,7 @@ pub fn generate_ninja_build(
             ninja_content.push_str(&format!("  pre_flags = {}\n", pre_link_flags.join(" ")));
         }
 
-        // 添加库链接标志，放在目标文件之后
+        // 添加库链接标志
         if !lib_flags.is_empty() {
             ninja_content.push_str(&format!("  lib_flags = {}\n", lib_flags.join(" ")));
         }
