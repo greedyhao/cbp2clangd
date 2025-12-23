@@ -133,3 +133,48 @@ fn test_parse_target_linker_add_directory() {
         "应该包含链接库 -lnet"
     );
 }
+
+#[test]
+fn test_parse_extra_commands() {
+    // 创建一个包含ExtraCommands的XML内容，包含各种$变量
+    let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<CodeBlocks_project_file>
+    <FileVersion major="1" minor="6" />
+    <Project>
+        <Option title="TestProject" />
+        <Option compiler="riscv32-v2" />
+        <Compiler>
+            <Add option="-Wall" />
+            <Add option="-g" />
+        </Compiler>
+        <ExtraCommands>
+            <Add before='$compiler $options $includes -E -P -x c -c &quot;$(PROJECT_DIR)output\bin\copy_tone.xm&quot; -o &quot;$(PROJECT_DIR)output\bin\copy_tone.bat&quot;' />
+            <Add before="Output\bin\prebuild.bat $(PROJECT_NAME)" />
+        </ExtraCommands>
+        <Unit filename="main.c" />
+    </Project>
+</CodeBlocks_project_file>"#;
+
+    let result = parse_cbp_file(xml_content);
+    assert!(result.is_ok());
+    let project_info = result.unwrap();
+
+    // 验证项目基本信息
+    assert_eq!(project_info.project_name, "TestProject");
+    assert_eq!(project_info.compiler_id, "riscv32-v2");
+
+    // 验证预构建命令数量
+    assert_eq!(project_info.prebuild_commands.len(), 2, "应该有2个预构建命令");
+
+    // 验证第一个预构建命令是否包含预期内容
+    let first_command = &project_info.prebuild_commands[0];
+    assert!(first_command.contains("riscv32-elf-gcc"), "第一个命令应该包含编译器路径");
+    assert!(first_command.contains("-Wall -g"), "第一个命令应该包含编译选项");
+    assert!(first_command.contains(".\\output\\bin\\copy_tone.xm"), "第一个命令应该包含替换后的项目目录路径");
+    assert!(first_command.contains(".\\output\\bin\\copy_tone.bat"), "第一个命令应该包含替换后的项目目录路径");
+
+    // 验证第二个预构建命令是否包含预期内容
+    let second_command = &project_info.prebuild_commands[1];
+    assert!(second_command.contains("Output\\bin\\prebuild.bat"), "第二个命令应该包含原始路径");
+    assert!(second_command.contains("TestProject"), "第二个命令应该包含项目名称");
+}

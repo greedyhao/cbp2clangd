@@ -1,3 +1,4 @@
+use crate::ToolchainConfig;
 use crate::models::{MarchInfo, SpecialFileBuildInfo};
 use roxmltree::Document;
 use std::collections::HashSet;
@@ -253,6 +254,48 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
     // 合并Project/Linker库和Build/Target/Linker库，Build/Target/Linker库放最后
     linker_libs = [linker_libs, build_target_linker_libs].concat();
 
+    let options_str = global_cflags.join(" ");
+    let includes_str = include_dirs.join(" ");
+
+    let toolchain = ToolchainConfig::from_compiler_id(&compiler_id)
+        .unwrap_or_else(|| {
+            // 如果找不到对应的编译器ID，回退到默认值，这里保持与 main.rs 一致的逻辑
+            ToolchainConfig::from_compiler_id("riscv32-v2").unwrap()
+        });
+    
+    // 获取编译器的执行路径 (例如: C:\Program Files\...\riscv32-elf-gcc.exe)
+    // 这样生成的 bat 文件中可以直接调用绝对路径，避免依赖 PATH 环境变量
+    let compiler_cmd = format!("\"{}\"", toolchain.compiler_path());
+
+    // 定义宏替换闭包
+    let replace_cb_macros = |cmd: &str| -> String {
+        let mut processed = cmd.to_string();
+        
+        // 1. 替换编译器变量 (现在使用的是 config.rs 中定义的真实路径)
+        processed = processed.replace("$compiler", &compiler_cmd);
+        
+        // 2. 替换编译选项和头文件路径
+        processed = processed.replace("$options", &options_str);
+        processed = processed.replace("$includes", &includes_str);
+        
+        // 3. 替换项目信息
+        processed = processed.replace("$(PROJECT_NAME)", &project_name);
+        
+        // 4. 替换项目路径 $(PROJECT_DIR)
+        // Code::Blocks 中 $(PROJECT_DIR) 通常指 .cbp 文件所在目录
+        // 在生成的批处理中，我们通常在项目根目录运行，所以替换为当前目录
+        if processed.contains("$(PROJECT_DIR)") {
+            // 替换为 Windows 风格的当前目录引用，或者根据 cmd 上下文调整
+            // 这里简单的替换为 .\\ 即可，因为后续通常接相对路径
+            processed = processed.replace("$(PROJECT_DIR)", ".\\");
+        }
+
+        // 5. 额外清理：有时候路径中会出现双反斜杠或混合斜杠，虽然 Windows 通常能容忍，但看着不整洁
+        // processed = processed.replace("\\\\", "\\"); 
+
+        processed
+    };
+
     // 解析ExtraCommands节点
     if let Some(extra_commands_node) = project
         .children()
@@ -265,13 +308,17 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
             if let Some(before) = add.attribute("before") {
                 let trimmed_before = before.trim();
                 if !trimmed_before.is_empty() {
-                    prebuild_commands.push(trimmed_before.to_string());
+                    // 应用宏替换
+                    let final_cmd = replace_cb_macros(trimmed_before);
+                    prebuild_commands.push(final_cmd);
                 }
             }
             if let Some(after) = add.attribute("after") {
                 let trimmed_after = after.trim();
                 if !trimmed_after.is_empty() {
-                    postbuild_commands.push(trimmed_after.to_string());
+                    // 应用宏替换
+                    let final_cmd = replace_cb_macros(trimmed_after);
+                    postbuild_commands.push(final_cmd);
                 }
             }
         }
