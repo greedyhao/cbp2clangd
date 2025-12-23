@@ -5,9 +5,9 @@ use crate::parser::ProjectInfo;
 use crate::utils::get_short_path;
 use std::path::{Component, Path, PathBuf};
 
-/// 辅助函数：将路径分隔符统一为 Unix 风格 (/), 避免 Ninja 在 Windows 下的问题
+/// 辅助函数：将路径分隔符统一为 Windows 风格 (\), 与 cbp 工程保持一致
 fn normalize_path(path: &Path) -> String {
-    path.to_string_lossy().replace("\\", "/")
+    path.to_string_lossy().replace("/", "\\")
 }
 
 /// 辅助函数：逻辑上解析绝对路径（不依赖文件系统存在性，仅处理路径组件）

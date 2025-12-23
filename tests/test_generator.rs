@@ -89,8 +89,8 @@ fn test_generate_ninja_build_for_executable() {
 
     // 检查生成的ninja内容是否包含预期的规则和目标
     assert!(ninja_content.contains("rule link"));
-    assert!(ninja_content.contains("build Output/bin/chatbot.elf: link"));
-    assert!(ninja_content.contains("default Output/bin/chatbot.elf"));
+    assert!(ninja_content.contains("build Output\\bin\\chatbot.elf: link"));
+    assert!(ninja_content.contains("default Output\\bin\\chatbot.elf"));
 }
 
 #[test]
