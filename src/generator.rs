@@ -5,9 +5,25 @@ use crate::parser::ProjectInfo;
 use crate::utils::get_short_path;
 use std::path::{Component, Path, PathBuf};
 
-/// 辅助函数：将路径分隔符统一为 Windows 风格 (\), 与 cbp 工程保持一致
+/// 辅助函数：将Path转换为Windows风格的字符串路径（使用反斜杠作为分隔符）
 fn normalize_path(path: &Path) -> String {
-    path.to_string_lossy().replace("/", "\\")
+    let path_str = path.to_string_lossy().into_owned();
+    // 确保在所有平台上都使用Windows风格的路径分隔符
+    path_str.replace("/", "\\")
+}
+
+/// 新增辅助函数：直接标准化字符串类型的路径
+fn normalize_str(s: &str) -> String {
+    s.replace("/", "\\")
+}
+
+/// 新增核心函数：清洗构建参数（Flags）
+/// 这是一个系统性的解决方案，用于处理 "-Ipath/to", "-Lpath/to", "path/to/file.a" 等各种情况
+fn sanitize_flag(flag: &str) -> String {
+    // 简单直接的策略：在 Windows 环境生成场景下，将所有正斜杠替换为反斜杠
+    // 这对于 GCC/Clang 的路径参数（-I, -L, -o, 纯文件名）都是安全的
+    // 同时也统一了视觉风格
+    flag.replace("/", "\\")
 }
 
 /// 辅助函数：逻辑上解析绝对路径（不依赖文件系统存在性，仅处理路径组件）
@@ -387,20 +403,15 @@ pub fn generate_ninja_build(
 ) -> Result<String, Box<dyn std::error::Error>> {
     debug_println!("[DEBUG generator] Starting to generate ninja build file...");
 
-    // 辅助函数：标准化工具路径 (使用 / 替换 \\)
-    let clean_tool_path = |path: &str| -> String {
-        path.replace("\\", "/")
-    };
-
     // 使用工具链中的编译器路径
     let compiler_path = toolchain.compiler_path();
-    let compiler_exists = std::path::Path::new(&compiler_path).exists();
+    let compiler_exists = Path::new(&compiler_path).exists();
     let compiler = if compiler_exists {
         match get_short_path(&compiler_path) {
-            Ok(short_path) => clean_tool_path(&short_path),
+            Ok(short_path) => short_path,
             Err(e) => {
                 println!("[WARNING generator] Failed to get short path for compiler: {}. Using original path.", e);
-                clean_tool_path(&compiler_path)
+                compiler_path.clone()
             }
         }
     } else {
@@ -410,13 +421,13 @@ pub fn generate_ninja_build(
 
     // 获取链接器路径
     let linker_path = toolchain.linker_path(&project_info.linker_type);
-    let linker_exists = std::path::Path::new(&linker_path).exists();
+    let linker_exists = Path::new(&linker_path).exists();
     let linker = if linker_exists {
         match get_short_path(&linker_path) {
-            Ok(short_path) => clean_tool_path(&short_path),
+            Ok(short_path) => short_path,
             Err(e) => {
                 println!("[WARNING generator] Failed to get short path for linker: {}. Using original path.", e);
-                clean_tool_path(&linker_path)
+                linker_path.clone()
             }
         }
     } else {
@@ -434,11 +445,12 @@ pub fn generate_ninja_build(
     // 构建基础编译器标志
     let mut base_flags: Vec<String> = Vec::new();
     for flag in &project_info.global_cflags {
-        base_flags.push(flag.clone());
+        base_flags.push(sanitize_flag(flag)); // 确保全局CFLAGS里的路径也被转换
     }
     for include in &project_info.include_dirs {
-        let p = Path::new(include);
-        base_flags.push(normalize_path(p));
+        // -I 选项
+        let clean_path = normalize_path(Path::new(include));
+        base_flags.push(format!("{}", clean_path));
     }
 
     // 规则部分
@@ -594,13 +606,13 @@ pub fn generate_ninja_build(
     if is_static_lib {
         // 静态库目标
         let ar_path = toolchain.ar_path();
-        let ar_exists = std::path::Path::new(&ar_path).exists();
+        let ar_exists = Path::new(&ar_path).exists();
         let ar = if ar_exists {
             match get_short_path(&ar_path) {
-                Ok(short_path) => clean_tool_path(&short_path),
+                Ok(short_path) => short_path,
                 Err(e) => {
                     println!("[WARNING generator] Failed to get short path for ar: {}. Using original.", e);
-                    clean_tool_path(&ar_path)
+                    ar_path.clone()
                 }
             }
         } else {
@@ -639,7 +651,12 @@ pub fn generate_ninja_build(
         debug_println!("[DEBUG generator] Resolving library dependencies...");
         
         for lib in &project_info.linker_libs {
-            lib_flags.push(lib.clone());
+            // 在这里应用 sanitize_flag
+            // 这样无论是 "-lmath", "libs/libmath.a", 还是 "../libs/libfoo.a" 
+            // 都会变成 Windows 风格 (../libs/libfoo.a -> ..\libs\libfoo.a)
+            lib_flags.push(sanitize_flag(lib)); 
+
+            // 依赖解析逻辑（用于 ninja 的 implicit deps）
             if let Some(resolved_path) = resolve_library_path(lib, &project_info.linker_lib_dirs, project_dir) {
                 debug_println!("[DEBUG generator] Resolved library {} to {}", lib, resolved_path);
                 resolved_lib_dependencies.push(resolved_path);
@@ -651,17 +668,19 @@ pub fn generate_ninja_build(
         // 添加链接器选项
         for opt in &project_info.linker_options {
             let replaced_opt = opt.replace("$(TARGET_OBJECT_DIR)", &clean_obj_dir);
-            pre_link_flags.push(replaced_opt);
+            // Linker options 可能包含 -Map=output/path.map 之类的，需要转换路径分隔符
+            pre_link_flags.push(sanitize_flag(&replaced_opt));
         }
         // 添加链接库目录
         for lib_dir in &project_info.linker_lib_dirs {
-            let clean_dir = normalize_path(Path::new(lib_dir));
+            // 统一处理 -L 标志
             if lib_dir.starts_with("-L") {
                 let path_part = &lib_dir[2..];
-                let clean_part = normalize_path(Path::new(path_part));
+                // normalize_str 替换斜杠
+                let clean_part = normalize_str(path_part);
                 pre_link_flags.push(format!("-L{}", clean_part));
             } else {
-                pre_link_flags.push(clean_dir);
+                pre_link_flags.push(normalize_str(lib_dir));
             }
         }
 
