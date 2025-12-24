@@ -368,19 +368,35 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
             if is_regular_source {
                 // 普通源文件，添加到source_files
                 source_files.push(filename.to_string());
-            } else if should_compile && !build_commands.is_empty() {
-                // 特殊文件，有编译选项和构建命令
-                // 查找匹配当前编译器的构建命令
-                let matching_build_cmd = build_commands
-                    .iter()
-                    .find(|(compiler, _)| compiler == &compiler_id)
-                    .or_else(|| build_commands.first());
+            } else if should_compile {
+                // 特殊文件，只要should_compile为true，不管有没有buildCommand，都要处理
+                if !build_commands.is_empty() {
+                    // 查找匹配当前编译器的构建命令
+                    let matching_build_cmd = build_commands
+                        .iter()
+                        .find(|(compiler, _)| compiler == &compiler_id)
+                        .or_else(|| build_commands.first());
 
-                if let Some((compiler, build_cmd)) = matching_build_cmd {
+                    if let Some((compiler, build_cmd)) = matching_build_cmd {
+                        special_files.push(SpecialFileBuildInfo {
+                            filename: filename.to_string(),
+                            compiler_id: compiler.clone(),
+                            build_command: build_cmd.clone(),
+                        });
+                    } else {
+                        // 没有匹配的构建命令，使用默认的空命令
+                        special_files.push(SpecialFileBuildInfo {
+                            filename: filename.to_string(),
+                            compiler_id: compiler_id.clone(),
+                            build_command: String::new(),
+                        });
+                    }
+                } else {
+                    // 没有buildCommand，使用默认的空命令
                     special_files.push(SpecialFileBuildInfo {
                         filename: filename.to_string(),
-                        compiler_id: compiler.clone(),
-                        build_command: build_cmd.clone(),
+                        compiler_id: compiler_id.clone(),
+                        build_command: String::new(),
                     });
                 }
             }

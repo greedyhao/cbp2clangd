@@ -510,70 +510,86 @@ pub fn generate_ninja_build(
     // === 结束新增逻辑 ===
 
     // 处理特殊文件（只编译，不链接）
-    let mut special_output_files = Vec::new();
-    for special_file in &project_info.special_files {
-        // 解析构建命令中的目标文件名
-        let mut processed_cmd = special_file.build_command.clone();
+        let mut special_output_files = Vec::new();
+        for special_file in &project_info.special_files {
+            // 解析构建命令中的目标文件名
+            let mut processed_cmd = special_file.build_command.clone();
 
-        // 路径标准化处理
-        let clean_file_path = normalize_path(Path::new(&special_file.filename));
-        let clean_includes = project_info.include_dirs.iter()
-            .map(|p| normalize_path(Path::new(p)))
-            .collect::<Vec<_>>()
-            .join(" ");
+            // 路径标准化处理
+            let clean_file_path = normalize_path(Path::new(&special_file.filename));
+            let clean_includes = project_info.include_dirs.iter()
+                .map(|p| normalize_path(Path::new(p)))
+                .collect::<Vec<_>>()
+                .join(" ");
 
-        // 替换变量
-        processed_cmd = processed_cmd.replace("$compiler", &compiler);
-        processed_cmd = processed_cmd.replace("$options", &base_flags.join(" "));
-        processed_cmd = processed_cmd.replace("$includes", &clean_includes);
-        processed_cmd = processed_cmd.replace("$file", &clean_file_path);
-        processed_cmd = processed_cmd.replace("$(TARGET_OBJECT_DIR)", &clean_obj_dir);
-        processed_cmd = processed_cmd.replace("$(TARGET_OUTPUT_DIR)", &clean_obj_dir);
+            // 替换变量
+            processed_cmd = processed_cmd.replace("$compiler", &compiler);
+            processed_cmd = processed_cmd.replace("$options", &base_flags.join(" "));
+            processed_cmd = processed_cmd.replace("$includes", &clean_includes);
+            processed_cmd = processed_cmd.replace("$file", &clean_file_path);
+            processed_cmd = processed_cmd.replace("$(TARGET_OBJECT_DIR)", &clean_obj_dir);
+            processed_cmd = processed_cmd.replace("$(TARGET_OUTPUT_DIR)", &clean_obj_dir);
 
-        // 提取输出文件名
-        let output_file = if let Some(output_pos) = processed_cmd.find("-o ") {
-            let rest = &processed_cmd[output_pos + 3..];
-            let raw_out = if let Some(space_pos) = rest.find(' ') {
-                &rest[..space_pos]
+            // 提取输出文件名
+            let output_file = if let Some(output_pos) = processed_cmd.find("-o ") {
+                let rest = &processed_cmd[output_pos + 3..];
+                let raw_out = if let Some(space_pos) = rest.find(' ') {
+                    &rest[..space_pos]
+                } else {
+                    rest
+                };
+                normalize_path(Path::new(raw_out))
             } else {
-                rest
-            };
-            normalize_path(Path::new(raw_out))
-        } else {
-            // 对特殊文件也应用类似的逻辑，尝试保持结构，但因为它是自定义命令，
-            // 通常由用户指定输出位置。这里只做简单的 fallback
-            let abs_path = get_clean_absolute_path(project_dir, Path::new(&special_file.filename));
-            let relative_structure = abs_path.strip_prefix(&common_ancestor)
-                .unwrap_or_else(|_| Path::new(&special_file.filename));
-            
-            let full_path = Path::new(&project_info.object_output)
-                .join(relative_structure)
-                .with_extension("o");
+                // 对特殊文件也应用类似的逻辑，尝试保持结构，但因为它是自定义命令，
+                // 通常由用户指定输出位置。这里只做简单的 fallback
+                let abs_path = get_clean_absolute_path(project_dir, Path::new(&special_file.filename));
+                let relative_structure = abs_path.strip_prefix(&common_ancestor)
+                    .unwrap_or_else(|_| Path::new(&special_file.filename));
                 
-            normalize_path(&full_path)
-        };
+                let full_path = Path::new(&project_info.object_output)
+                    .join(relative_structure)
+                    .with_extension("o");
+                    
+                normalize_path(&full_path)
+            };
 
-        special_output_files.push(output_file.clone());
+            special_output_files.push(output_file.clone());
 
-        let rule_name = format!(
-            "special_{}",
-            special_file
-                .filename
-                .replace(".", "_")
-                .replace("/", "_")
-                .replace("\\", "_")
-                .replace(":", "_")
-        );
-        ninja_content.push_str(&format!("rule {}\n", rule_name));
-        ninja_content.push_str(&format!("  command = {}\n", processed_cmd));
-        ninja_content.push_str("\n");
+            let rule_name = format!(
+                "special_{}",
+                special_file
+                    .filename
+                    .replace(".", "_")
+                    .replace("/", "_")
+                    .replace("\\", "_")
+                    .replace(":", "_")
+            );
+            
+            // 如果构建命令为空，生成一个创建空.o文件的命令
+            let final_command = if processed_cmd.is_empty() {
+                // 在Windows上创建空文件的命令：先创建目录，再创建文件
+                let output_path = Path::new(&output_file);
+                let output_dir = output_path.parent().unwrap_or(Path::new("."));
+                let output_dir_str = normalize_path(output_dir);
+                
+                // 使用mkdir命令创建目录（如果不存在），然后创建空文件
+                // mkdir -p 确保创建所有必要的父目录
+                // 注意：ninja在Windows上使用cmd.exe执行命令，所以需要用cmd /c来运行多个命令
+                format!("cmd /c (mkdir -p {} >nul 2>&1) & (type nul > {})", output_dir_str, output_file)
+            } else {
+                processed_cmd
+            };
+            
+            ninja_content.push_str(&format!("rule {}\n", rule_name));
+            ninja_content.push_str(&format!("  command = {}\n", final_command));
+            ninja_content.push_str("\n");
 
-        ninja_content.push_str(&format!(
-            "build {}: {} {}\n",
-            output_file, rule_name, clean_file_path
-        ));
-        ninja_content.push_str("\n");
-    }
+            ninja_content.push_str(&format!(
+                "build {}: {} {}\n",
+                output_file, rule_name, clean_file_path
+            ));
+            ninja_content.push_str("\n");
+        }
 
     // 构建部分 - 普通源文件
     for (src, obj) in src_to_obj_map {

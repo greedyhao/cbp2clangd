@@ -261,6 +261,51 @@ fn test_parse_special_files() {
 }
 
 #[test]
+fn test_parse_special_files_without_build_command() {
+    // 创建一个没有buildCommand的特殊文件XML内容
+    let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<CodeBlocks_project_file>
+    <FileVersion major="1" minor="6" />
+    <Project>
+        <Option title="TestProject" />
+        <Option compiler="riscv32-v2" />
+        <Build>
+            <Target title="Debug">
+                <Option output="Output/bin/test.elf" prefix_auto="1" extension_auto="0" />
+                <Option object_output="Output/obj/Debug" />
+            </Target>
+        </Build>
+        <Unit filename="src/special.asm">
+            <Option compile="1" />
+            <!-- 没有buildCommand属性 -->
+        </Unit>
+        <Unit filename="src/regular.c">
+            <Option compile="1" />
+        </Unit>
+    </Project>
+</CodeBlocks_project_file>"#;
+
+    let result = parse_cbp_file(xml_content);
+    assert!(result.is_ok());
+    let project_info = result.unwrap();
+
+    // 验证项目基本信息
+    assert_eq!(project_info.project_name, "TestProject");
+    assert_eq!(project_info.compiler_id, "riscv32-v2");
+
+    // 验证普通源文件被正确处理
+    assert_eq!(project_info.source_files.len(), 1, "应该有1个普通源文件");
+    assert!(project_info.source_files.contains(&"src/regular.c".to_string()), "应该包含src/regular.c");
+
+    // 验证没有buildCommand的特殊文件也被正确处理
+    assert_eq!(project_info.special_files.len(), 1, "应该有1个特殊文件");
+    let special_file = &project_info.special_files[0];
+    assert_eq!(special_file.filename, "src/special.asm");
+    assert_eq!(special_file.compiler_id, "riscv32-v2");
+    assert_eq!(special_file.build_command, "", "build_command应该为空字符串");
+}
+
+#[test]
 fn test_parse_march_info() {
     // 创建一个包含march指令的XML内容
     let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
