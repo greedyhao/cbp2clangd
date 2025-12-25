@@ -61,21 +61,11 @@ fn get_clean_absolute_path(base: &Path, rel: &Path) -> PathBuf {
 
 /// 辅助函数：计算一组路径的共同祖先目录
 fn find_common_ancestor(paths: &[PathBuf]) -> PathBuf {
-    if paths.is_empty() {
-        return PathBuf::from(".");
-    }
-    
-    // 以第一个路径作为初始祖先
+    if paths.is_empty() { return PathBuf::from("."); }
     let mut ancestor = paths[0].parent().unwrap_or(Path::new("")).to_path_buf();
-    
     for path in paths.iter().skip(1) {
-        // 逐级向上回退，直到 ancestor 是 path 的前缀
         while !path.starts_with(&ancestor) {
-            if !ancestor.pop() {
-                // 如果回退到空，说明没有共同祖先（例如跨盘符），返回空或根
-                // 在这种极端情况下，通常意味着无法保持目录结构，返回当前目录作为fallback
-                return PathBuf::from("."); 
-            }
+            if !ancestor.pop() { return PathBuf::from("."); }
         }
     }
     ancestor
@@ -178,6 +168,55 @@ pub fn generate_clangd_config(
 
     debug_println!("[DEBUG generator] Successfully generated .clangd config content");
     Ok(content)
+}
+
+/// 包含 PathMatch 和 CompilationDatabase
+pub fn generate_clangd_fragment(
+    project_info: &ProjectInfo,
+    project_dir: &Path,     // CBP 目录
+    workspace_root: &Path,  // .clangd 根目录
+    db_path: &Path,         // compile_commands.json 目录
+) -> Result<(String, String), Box<dyn std::error::Error>> {
+    debug_println!("[DEBUG generator] Generating clangd fragment...");
+
+    // 1. 计算 PathMatch (基于源文件共同祖先)
+    let abs_source_paths: Vec<PathBuf> = project_info.source_files.iter()
+        .map(|src| get_clean_absolute_path(project_dir, Path::new(src)))
+        .collect();
+    
+    let common_ancestor = find_common_ancestor(&abs_source_paths);
+    
+    // 计算相对于 workspace_root 的路径
+    let relative_ancestor = if let Ok(rel) = common_ancestor.strip_prefix(workspace_root) {
+        rel
+    } else {
+        if let Ok(rel_proj) = project_dir.strip_prefix(workspace_root) {
+            rel_proj
+        } else {
+            Path::new("")
+        }
+    };
+
+    let rel_str = relative_ancestor.to_string_lossy().replace("\\", "/");
+    
+    // 生成正则路径，如果是空（根目录）则匹配项目名或所有
+    let path_match = if rel_str.is_empty() || rel_str == "." {
+        // 如果项目就在根目录下，匹配所有子目录或者特定文件
+        ".*".to_string() 
+    } else {
+        format!("{}/.*", rel_str)
+    };
+
+    // 2. CompilationDatabase (使用绝对路径，转为正斜杠)
+    let db_path_str = db_path.to_string_lossy().replace("\\", "/");
+
+    // 3. 生成片段内容
+    let fragment = format!(
+        "If:\n  PathMatch: {}\n\nCompileFlags:\n  CompilationDatabase: {}",
+        path_match, db_path_str
+    );
+
+    Ok((path_match, fragment))
 }
 
 /// 生成编译命令列表
