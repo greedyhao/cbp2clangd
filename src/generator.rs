@@ -8,8 +8,14 @@ use std::path::{Component, Path, PathBuf};
 /// 辅助函数：将Path转换为Windows风格的字符串路径（使用反斜杠作为分隔符）
 fn normalize_path(path: &Path) -> String {
     let path_str = path.to_string_lossy().into_owned();
+    // 移除可能存在的 UNC 路径前缀 (\\?\) 以避免某些工具兼容性问题
+    let clean_path = if path_str.starts_with("\\\\?\\") {
+        &path_str[4..]
+    } else {
+        &path_str
+    };
     // 确保在所有平台上都使用Windows风格的路径分隔符
-    path_str.replace("/", "\\")
+    clean_path.replace("/", "\\")
 }
 
 /// 新增辅助函数：直接标准化字符串类型的路径
@@ -95,8 +101,8 @@ pub fn generate_clangd_config(
 
     // 构建Add部分
     debug_println!("[DEBUG generator] Building Add flags section...");
-    let mut add_flags = vec!["-xc", "-target riscv32-unknown-elf"];
-    debug_println!("[DEBUG generator] Added base flags: -xc, -target riscv32-unknown-elf");
+    let mut add_flags = vec!["-xc", "-target", "riscv32-unknown-elf"];
+    debug_println!("[DEBUG generator] Added base flags: -xc, -target, riscv32-unknown-elf");
 
     // 添加include路径
     debug_println!("[DEBUG generator] Adding include paths to Add flags...");
@@ -228,13 +234,48 @@ pub fn generate_compile_commands(
     };
     debug_println!("[DEBUG generator] Final compiler path to use: {}", compiler);
 
-    debug_println!("[DEBUG generator] Building base compiler flags...");
-    let base_flags: Vec<String> = project_info
-        .global_cflags
-        .iter()
-        .cloned()
-        .chain(project_info.include_dirs.iter().cloned())
-        .collect();
+    debug_println!("[DEBUG generator] Building base compiler flags with absolute paths...");
+
+    // 定义一个闭包来处理 flag，如果是 -I 开头，则转为绝对路径
+    let resolve_include_path = |flag: &str| -> String {
+        if flag.starts_with("-I") {
+            let path_part = &flag[2..]; // 去掉 -I 前缀
+            let path = Path::new(path_part);
+
+            // 计算绝对路径
+            let abs_path = if path.is_absolute() {
+                // 如果已经是绝对路径，直接使用（尝试规范化以去除可能存在的 ..）
+                if path.exists() {
+                     path.canonicalize().unwrap_or(path.to_path_buf())
+                } else {
+                     path.to_path_buf()
+                }
+            } else {
+                // 如果是相对路径，使用 get_clean_absolute_path 基于 project_dir 解析
+                // 这个函数已经在 generator.rs 中定义好了，可以处理 ../ 逻辑
+                get_clean_absolute_path(project_dir, path)
+            };
+
+            // 重新组装为 -I路径，并使用 normalize_path 统一分隔符
+            format!("-I{}", normalize_path(&abs_path))
+        } else {
+            // 非 include 选项（如 -g, -O2 等），保持原样
+            flag.to_string()
+        }
+    };
+
+    let mut base_flags: Vec<String> = Vec::new();
+
+    // 1. 处理 global_cflags (防止里面包含手动写的 -I)
+    for flag in &project_info.global_cflags {
+        base_flags.push(resolve_include_path(flag));
+    }
+
+    // 2. 处理 include_dirs (parser 中已经加上了 -I 前缀)
+    for flag in &project_info.include_dirs {
+        base_flags.push(resolve_include_path(flag));
+    }
+
     debug_println!("[DEBUG generator] Base flags: {:?}", base_flags);
 
     debug_println!(
@@ -249,9 +290,27 @@ pub fn generate_compile_commands(
             project_info.source_files.len(),
             src
         );
-        // 尝试获取源文件的短路径名
+
+        // === 修改开始：生成绝对路径 ===
+        debug_println!("[DEBUG generator] Calculating absolute path for source file...");
+        let abs_path_buf = project_dir.join(src);
+        
+        // 尝试标准化路径（解析 .. 符号），如果文件存在则 canonicalize，否则直接用 join 的结果
+        let abs_path_buf = if abs_path_buf.exists() {
+             abs_path_buf.canonicalize().unwrap_or(abs_path_buf)
+        } else {
+             // 如果文件不存在（罕见），尝试逻辑清洗路径
+             get_clean_absolute_path(project_dir, Path::new(src))
+        };
+
+        // 转换为字符串并标准化分隔符
+        let abs_path_str = normalize_path(&abs_path_buf);
+        debug_println!("[DEBUG generator] Absolute path: {}", abs_path_str);
+        // === 修改结束 ===
+
+        // 尝试获取源文件的短路径名 (用于 build command)
         debug_println!("[DEBUG generator] Attempting to get short path for source file...");
-        let src_path = match get_short_path(src) {
+        let src_path_for_cmd = match get_short_path(&abs_path_str) {
             Ok(short_path) => {
                 debug_println!(
                     "[DEBUG generator] Successfully got short path: {}",
@@ -261,17 +320,18 @@ pub fn generate_compile_commands(
             }
             Err(e) => {
                 println!(
-                    "[WARNING generator] Failed to get short path for source file {}: {}. Using original path.",
+                    "[WARNING generator] Failed to get short path for source file {}: {}. Using absolute path.",
                     src, e
                 );
-                src.clone()
+                abs_path_str.clone()
             }
         };
 
         debug_println!("[DEBUG generator] Building command parts for file...");
         let mut cmd = vec![&compiler[..], "-c"];
         cmd.extend(base_flags.iter().map(|s| s.as_str()));
-        cmd.push(&src_path);
+        // 命令中使用处理过的路径（可能是短路径，也可能是绝对长路径）
+        cmd.push(&src_path_for_cmd);
 
         let command_str = cmd.join(" ");
         debug_println!("[DEBUG generator] Generated command: {}", command_str);
@@ -280,7 +340,7 @@ pub fn generate_compile_commands(
         compile_commands.push(CompileCommand {
             directory: project_dir.to_string_lossy().into_owned(),
             command: command_str,
-            file: src.clone(), // 保留原始文件名用于引用
+            file: abs_path_str, // 这里使用绝对路径
         });
     }
 
