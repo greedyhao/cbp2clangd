@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2025-12-26
+### Added
+- 添加单元测试
+
+### Changed
+- 重构主逻辑，支持合并多个 .clangd 配置
+- compile_commands.json 输出到 output_obj 目录
+
 ## [1.2.0] - 2025-12-25
 ### Changed
 - 合并Build/Target/Linker库和Project/Linker库，Project/Linker库放最后
