@@ -903,3 +903,52 @@ pub fn generate_build_script(
     debug_println!("[DEBUG generator] Successfully generated build script content");
     script_content
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_normalize_str() {
+        // 测试斜杠替换
+        assert_eq!(normalize_str("path/to/file"), "path\\to\\file");
+        // 测试 Windows 风格保持不变
+        assert_eq!(normalize_str("path\\to\\file"), "path\\to\\file");
+    }
+
+    #[test]
+    fn test_sanitize_flag() {
+        // 测试 Include 路径清洗
+        assert_eq!(sanitize_flag("-Ipath/to/include"), "-Ipath\\to\\include");
+        // 测试 Link 路径清洗
+        assert_eq!(sanitize_flag("-L../libs"), "-L..\\libs");
+        // 测试库文件
+        assert_eq!(sanitize_flag("libs/libm.a"), "libs\\libm.a");
+    }
+
+    #[test]
+    fn test_get_clean_absolute_path() {
+        let base = PathBuf::from("C:\\Project");
+        let rel = Path::new("..\\Libs\\test.c");
+        
+        let abs = get_clean_absolute_path(&base, rel);
+        // 注意：这个函数的逻辑是纯路径计算，不依赖文件系统
+        // C:\Project + ..\Libs\test.c -> C:\Libs\test.c
+        let expected = PathBuf::from("C:\\Libs\\test.c");
+        
+        assert_eq!(abs, expected);
+    }
+    
+    #[test]
+    fn test_find_common_ancestor() {
+        let paths = vec![
+            PathBuf::from("C:\\Proj\\src\\main.c"),
+            PathBuf::from("C:\\Proj\\src\\utils\\helper.c"),
+            PathBuf::from("C:\\Proj\\drivers\\gpio.c"),
+        ];
+        
+        let ancestor = find_common_ancestor(&paths);
+        assert_eq!(ancestor, PathBuf::from("C:\\Proj"));
+    }
+}

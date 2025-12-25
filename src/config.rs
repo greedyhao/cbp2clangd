@@ -160,3 +160,40 @@ impl ToolchainConfig {
         available
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_toolchain_version_mapping() {
+        let v2 = ToolchainConfig::from_compiler_id("riscv32-v2").unwrap();
+        assert_eq!(v2.version_name, "V2");
+        assert_eq!(v2.gcc_version, "10.2.0");
+
+        let v3 = ToolchainConfig::from_compiler_id("riscv32-v3").unwrap();
+        assert_eq!(v3.version_name, "V3");
+    }
+
+    #[test]
+    fn test_invalid_compiler_id() {
+        let invalid = ToolchainConfig::from_compiler_id("unknown-compiler");
+        assert!(invalid.is_none());
+    }
+
+    #[test]
+    fn test_path_generation() {
+        let config = ToolchainConfig {
+            version_name: "TestVer".to_string(),
+            gcc_version: "1.0.0".to_string(),
+            toolchain_base_path: Some("C:\\CustomToolchain".to_string()),
+        };
+
+        // 测试自定义路径
+        assert_eq!(config.compiler_path(), "C:\\CustomToolchain\\bin\\riscv32-elf-gcc.exe");
+        assert_eq!(config.ar_path(), "C:\\CustomToolchain\\bin\\riscv32-elf-ar.exe");
+        
+        // 测试 Linker 逻辑 (gcc vs ld)
+        assert!(config.linker_path("gcc").ends_with("gcc.exe"));
+        assert!(config.linker_path("ld").ends_with("ld.exe"));
+    }
+}

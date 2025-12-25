@@ -162,7 +162,7 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
                             // 标准RISC-V扩展通常是a, c, d, e, f, g, h, i, m, p, v等单个字母
                             // 自定义扩展通常以x开头，后面跟着更多字符
                             if let Some(x_index) = march_value.find('x') {
-                                let base_part = &march_value[0..x_index];
+                                let base_part = march_value[0..x_index].trim_end_matches('_');
                                 if !base_part.is_empty() {
                                     march_info.base_march = Some(format!("-march={}", base_part));
                                     march_info.has_custom_extension = true;
@@ -200,7 +200,7 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
                     // 标准RISC-V扩展通常是a, c, d, e, f, g, h, i, m, p, v等单个字母
                     // 自定义扩展通常以x开头，后面跟着更多字符
                     if let Some(x_index) = march_value.find('x') {
-                        let base_part = &march_value[0..x_index];
+                        let base_part = march_value[0..x_index].trim_end_matches('_');
                         if !base_part.is_empty() {
                             march_info.base_march = Some(format!("-march={}", base_part));
                             march_info.has_custom_extension = true;
@@ -468,4 +468,88 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
         linker_lib_dirs,
         linker_type: "gcc".to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 一个最小化的测试用 CBP 内容
+    const TEST_XML: &str = r#"
+    <CodeBlocks_project_file>
+        <FileVersion major="1" minor="6" />
+        <Project>
+            <Option title="TestProject" />
+            <Option compiler="riscv32-v2" />
+            <Build>
+                <Target title="Debug">
+                    <Option output="bin/Debug/TestProject.elf" />
+                    <Option object_output="obj/Debug/" />
+                    <Compiler>
+                        <Add option="-g" />
+                    </Compiler>
+                    <Linker>
+                        <Add library="m" />
+                    </Linker>
+                </Target>
+            </Build>
+            <Compiler>
+                <Add option="-Wall" />
+                <Add directory="src/include" />
+            </Compiler>
+            <Unit filename="main.c">
+                <Option compilerVar="CC" />
+            </Unit>
+            <Unit filename="utils.c">
+                <Option compilerVar="CC" />
+            </Unit>
+        </Project>
+    </CodeBlocks_project_file>
+    "#;
+
+    #[test]
+    fn test_parse_basic_project() {
+        let project = parse_cbp_file(TEST_XML).expect("Failed to parse valid XML");
+        
+        // 验证基本信息
+        assert_eq!(project.project_name, "TestProject");
+        assert_eq!(project.compiler_id, "riscv32-v2");
+        
+        // 验证源文件列表
+        assert!(project.source_files.contains(&"main.c".to_string()));
+        assert!(project.source_files.contains(&"utils.c".to_string()));
+        
+        // 验证 include 路径 (注意解析器里添加了 -I 前缀)
+        assert!(project.include_dirs.contains(&"-Isrc/include".to_string()));
+        
+        // 验证全局 Flag
+        assert!(project.global_cflags.contains(&"-Wall".to_string()));
+        
+        // 验证 Output 路径
+        assert_eq!(project.output, "bin/Debug/TestProject.elf");
+    }
+
+    #[test]
+    fn test_parse_march_extension() {
+        // 这里的 XML 必须包含至少一个 Unit，否则 parse_cbp_file 会报错 "No source files..."
+        let xml = r#"
+        <CodeBlocks_project_file>
+            <Project>
+                <Compiler>
+                    <Add option="-march=rv32imac_xabcd" />
+                </Compiler>
+                <Unit filename="dummy.c">
+                    <Option compile="1" />
+                </Unit>
+            </Project>
+        </CodeBlocks_project_file>
+        "#;
+        
+        // 现在这里应该返回 Ok，而不是 Err
+        let project = parse_cbp_file(xml).expect("Failed to parse project with custom march");
+        
+        assert_eq!(project.march_info.full_march, "-march=rv32imac_xabcd");
+        assert!(project.march_info.has_custom_extension);
+        assert_eq!(project.march_info.base_march, Some("-march=rv32imac".to_string()));
+    }
 }

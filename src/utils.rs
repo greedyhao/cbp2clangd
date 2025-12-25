@@ -145,3 +145,31 @@ pub fn get_short_path<P: AsRef<Path>>(path: P) -> Result<String, Box<dyn std::er
     debug_println!("[DEBUG utils] get_short_path completed successfully");
     Ok(short_path)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_debug_mode_toggle() {
+        set_debug_mode(true);
+        assert!(is_debug_mode());
+        
+        set_debug_mode(false);
+        assert!(!is_debug_mode());
+    }
+
+    // 注意：这个测试只能在 Windows 上运行
+    #[test]
+    #[cfg(windows)]
+    fn test_short_path_no_spaces() {
+        // 对于没有空格的路径，应该原样返回
+        let path = "C:\\Windows\\System32";
+        let result = get_short_path(path);
+        // 只要不是 error 就可以，具体路径依赖系统
+        assert!(result.is_ok());
+        if let Ok(p) = result {
+             assert_eq!(p, "C:\\Windows\\System32"); // 因为没空格
+        }
+    }
+}
