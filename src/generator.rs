@@ -702,7 +702,7 @@ pub fn generate_ninja_build(
 
         ninja_content.push_str("rule link\n");
         ninja_content.push_str(&format!(
-            "  command = {} $pre_flags $in $lib_flags -o $out\n",
+            "  command = {} $in $pre_flags $lib_flags -o $out\n",
             linker
         ));
         ninja_content.push_str("\n");

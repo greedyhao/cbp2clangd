@@ -240,10 +240,8 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
                             format!("-l{}", lib)
                         }
                     };
-                // 只有当Build/Target/Linker中没有这个库时，才添加到Project/Linker库列表
-                if !build_target_lib_set.contains(&processed_lib) {
-                    linker_libs.push(processed_lib);
-                }
+                // 参考cbp的方式，直接添加到Project/Linker库列表
+                linker_libs.push(processed_lib);
             }
             if let Some(dir) = add.attribute("directory") {
                 linker_lib_dirs.push(format!("-L{}", dir));
