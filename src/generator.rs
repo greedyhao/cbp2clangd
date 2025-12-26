@@ -672,9 +672,8 @@ pub fn generate_ninja_build(
                 let output_dir_str = normalize_path(output_dir);
                 
                 // 使用mkdir命令创建目录（如果不存在），然后创建空文件
-                // mkdir -p 确保创建所有必要的父目录
                 // 注意：ninja在Windows上使用cmd.exe执行命令，所以需要用cmd /c来运行多个命令
-                format!("cmd /c (mkdir -p {} >nul 2>&1) & (type nul > {})", output_dir_str, output_file)
+                format!("cmd /c (mkdir {} >nul 2>&1) & (type nul > {})", output_dir_str, output_file)
             } else {
                 processed_cmd
             };
