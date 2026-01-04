@@ -8,12 +8,22 @@ use std::path::{Component, Path, PathBuf};
 /// 辅助函数：将Path转换为Windows风格的字符串路径（使用反斜杠作为分隔符）
 fn normalize_path(path: &Path) -> String {
     let path_str = path.to_string_lossy().into_owned();
+
+    // 1. 处理 \\?\UNC\Server\Share 类型的路径 -> \\Server\Share
+    if path_str.starts_with("\\\\?\\UNC\\") {
+        // 截取掉 \\?\UNC\ (8个字符)，剩下 Server\Share...
+        let raw_unc = &path_str[8..];
+        return format!("\\\\{}", raw_unc.replace("/", "\\"));
+    }
+
+    // 2. 处理 \\?\C:\Path 类型的路径 -> C:\Path
     // 移除可能存在的 UNC 路径前缀 (\\?\) 以避免某些工具兼容性问题
     let clean_path = if path_str.starts_with("\\\\?\\") {
         &path_str[4..]
     } else {
         &path_str
     };
+
     // 确保在所有平台上都使用Windows风格的路径分隔符
     clean_path.replace("/", "\\")
 }
@@ -258,7 +268,7 @@ pub fn generate_compile_commands(
                     e
                 );
                 // 如果失败，使用长文件名路径
-                let long_path = format!("\\\\?\\{}", compiler_path);
+                let long_path = format!(r"\\?\{}", compiler_path);
                 debug_println!("[DEBUG generator] Using long path format: {}", long_path);
                 long_path
             }
@@ -281,17 +291,11 @@ pub fn generate_compile_commands(
             let path_part = &flag[2..]; // 去掉 -I 前缀
             let path = Path::new(path_part);
 
-            // 计算绝对路径
+            // 计算绝对路径时，优先使用逻辑路径计算，避免 canonicalize 展开网络驱动器
             let abs_path = if path.is_absolute() {
-                // 如果已经是绝对路径，直接使用（尝试规范化以去除可能存在的 ..）
-                if path.exists() {
-                     path.canonicalize().unwrap_or(path.to_path_buf())
-                } else {
-                     path.to_path_buf()
-                }
+                // 如果是绝对路径，也进行一次清洗以处理可能的 ..
+                get_clean_absolute_path(Path::new(""), path)
             } else {
-                // 如果是相对路径，使用 get_clean_absolute_path 基于 project_dir 解析
-                // 这个函数已经在 generator.rs 中定义好了，可以处理 ../ 逻辑
                 get_clean_absolute_path(project_dir, path)
             };
 
@@ -330,22 +334,15 @@ pub fn generate_compile_commands(
             src
         );
 
-        // === 修改开始：生成绝对路径 ===
-        debug_println!("[DEBUG generator] Calculating absolute path for source file...");
-        let abs_path_buf = project_dir.join(src);
-        
-        // 尝试标准化路径（解析 .. 符号），如果文件存在则 canonicalize，否则直接用 join 的结果
-        let abs_path_buf = if abs_path_buf.exists() {
-             abs_path_buf.canonicalize().unwrap_or(abs_path_buf)
-        } else {
-             // 如果文件不存在（罕见），尝试逻辑清洗路径
-             get_clean_absolute_path(project_dir, Path::new(src))
-        };
+        // === 修改关键点：避免使用 canonicalize ===
+        // 之前使用: abs_path_buf.canonicalize() 会导致 Z: 变 \\server\share
+        // 现在使用: get_clean_absolute_path 仅做逻辑拼接
+        debug_println!("[DEBUG generator] Calculating absolute path for source file (logically)...");
+        let abs_path_buf = get_clean_absolute_path(project_dir, Path::new(src));
 
         // 转换为字符串并标准化分隔符
         let abs_path_str = normalize_path(&abs_path_buf);
         debug_println!("[DEBUG generator] Absolute path: {}", abs_path_str);
-        // === 修改结束 ===
 
         // 尝试获取源文件的短路径名 (用于 build command)
         debug_println!("[DEBUG generator] Attempting to get short path for source file...");
@@ -949,5 +946,18 @@ mod tests {
         
         let ancestor = find_common_ancestor(&paths);
         assert_eq!(ancestor, PathBuf::from("C:\\Proj"));
+    }
+    
+    #[test]
+    fn test_normalize_unc() {
+        // 测试 \\?\UNC\ 路径修复
+        let p = Path::new("\\\\?\\UNC\\Server\\Share\\File.c");
+        assert_eq!(normalize_path(p), "\\\\Server\\Share\\File.c");
+    }
+
+    #[test]
+    fn test_normalize_clean() {
+        let p = Path::new("\\\\?\\C:\\Path\\File.c");
+        assert_eq!(normalize_path(p), "C:\\Path\\File.c");
     }
 }

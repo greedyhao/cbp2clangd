@@ -1,6 +1,6 @@
 use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 // Windows API相关导入
 use windows_sys::Win32::Foundation::GetLastError;
@@ -32,6 +32,46 @@ macro_rules! debug_println {
             println!($($arg)*);
         }
     };
+}
+
+/// 逻辑上计算绝对路径（不解析符号链接或映射驱动器，保留盘符）
+/// 替代 std::fs::canonicalize，避免将 Z: 解析为 UNC 路径
+pub fn compute_absolute_path(path: &Path) -> std::io::Result<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+
+    // 逻辑消除 ".." 和 "."
+    let mut clean_path = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::ParentDir => {
+                clean_path.pop();
+            }
+            Component::Normal(c) => {
+                clean_path.push(c);
+            }
+            Component::RootDir => {
+                // 在 Windows 上，push RootDir (例如 "\") 可能会重置 PathBuf
+                // 但如果是遍历 Components 重组，我们需要小心处理
+                // 通常 Prefix 包含了盘符，RootDir 包含了斜杠
+                clean_path.push(Component::RootDir.as_os_str());
+            }
+            Component::Prefix(prefix) => {
+                clean_path.push(Component::Prefix(prefix).as_os_str());
+            }
+            Component::CurDir => {}
+        }
+    }
+
+    // 如果结果为空（例如在某些边缘情况下），至少返回 "."
+    if clean_path.as_os_str().is_empty() {
+        Ok(PathBuf::from("."))
+    } else {
+        Ok(clean_path)
+    }
 }
 
 /// 将路径转换为Windows 8.3短文件名格式
@@ -171,5 +211,16 @@ mod tests {
         if let Ok(p) = result {
              assert_eq!(p, "C:\\Windows\\System32"); // 因为没空格
         }
+    }
+
+    #[test]
+    fn test_compute_absolute_path() {
+        let p = Path::new("test/../src/main.rs");
+        // 假设当前目录下运行
+        let abs = compute_absolute_path(p).unwrap();
+        assert!(abs.is_absolute());
+        // 验证逻辑消除是否生效 (字符串中不应包含 ..)
+        let s = abs.to_string_lossy();
+        assert!(!s.contains(".."));
     }
 }

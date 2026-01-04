@@ -15,3 +15,4 @@ pub use generator::{
 pub use parser::parse_cbp_file;
 pub use utils::is_debug_mode;
 pub use utils::set_debug_mode;
+pub use utils::compute_absolute_path;

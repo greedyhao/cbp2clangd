@@ -2,7 +2,7 @@ use std::env;
 use std::fs;
 
 use cbp2clangd::{
-    ToolchainConfig, debug_println, generate_build_script, generate_compile_commands,
+    ToolchainConfig, compute_absolute_path, debug_println, generate_build_script, generate_compile_commands,
     generate_ninja_build, parse_args, parse_cbp_file, set_debug_mode,
     // 引入两个生成函数
     generate_clangd_config, generate_clangd_fragment,
@@ -41,16 +41,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     debug_println!("[DEBUG] Linker type: {}", args.linker_type);
 
     // 确保 workspace_root 是绝对路径 (用于 .clangd 计算相对路径)
-    let workspace_root = if cli_output_dir.is_absolute() {
-        if cli_output_dir.exists() {
-            cli_output_dir.canonicalize()?
-        } else {
-            cli_output_dir.clone()
-        }
-    } else {
-        // 理论上 cli.rs 已经处理了相对路径转绝对，但这里防御性处理一下
-        fs::create_dir_all(cli_output_dir)?;
-        cli_output_dir.canonicalize()?
+    // 修改：使用 compute_absolute_path 替代 canonicalize，避免 Z: 变 UNC
+    let workspace_root = compute_absolute_path(cli_output_dir)?;
+
+    // 如果目录不存在，先创建 (为了安全起见，虽然 compute_absolute_path 不需要文件存在)
+    if !workspace_root.exists() {
+         fs::create_dir_all(&workspace_root)?;
     };
 
     debug_println!("[DEBUG] Workspace Root: {}", workspace_root.display());
@@ -141,11 +137,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 测试模式：直接使用当前目录
         std::env::current_dir()?
     } else {
-        // 正常模式：获取cbp_path的父目录的规范路径
-        cbp_path
+        // 正常模式：获取cbp_path的父目录
+        // 修改：使用 compute_absolute_path 替代 canonicalize
+        let parent = cbp_path
             .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .canonicalize()?
+            .unwrap_or_else(|| std::path::Path::new("."));
+        compute_absolute_path(parent)?
     };
     debug_println!("[DEBUG] Project directory: {}", project_dir.display());
 
@@ -161,19 +158,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let raw_obj_out = &project_info.object_output;
     let abs_object_output = project_dir.join(raw_obj_out);
     fs::create_dir_all(&abs_object_output)?;
-    let abs_object_output = abs_object_output.canonicalize()?;
+    // 修改：使用 compute_absolute_path 替代 canonicalize
+    let abs_object_output = compute_absolute_path(&abs_object_output)?;
 
     debug_println!("[DEBUG] Object Output: {}", abs_object_output.display());
 
     // 2. 生成 compile_commands.json
     debug_println!("[DEBUG] Preparing compile_commands.json path...");
 
-    // 首先规范化输出目录路径
-    debug_println!(
-        "[DEBUG] Normalizing output directory path: {}",
-        abs_object_output.display()
-    );
-    let normalized_output_dir = abs_object_output.canonicalize()?;
+    // 修改：使用 compute_absolute_path 替代 canonicalize
+    let normalized_output_dir = compute_absolute_path(&abs_object_output)?;
     debug_println!(
         "[DEBUG] Normalized output directory: {}",
         normalized_output_dir.display()
