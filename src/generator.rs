@@ -2,7 +2,7 @@ use crate::config::ToolchainConfig;
 use crate::debug_println;
 use crate::models::CompileCommand;
 use crate::parser::ProjectInfo;
-use crate::utils::get_short_path;
+use crate::utils::{escape_ninja_path, get_short_path, quote_if_needed};
 use std::path::{Component, Path, PathBuf};
 
 /// 辅助函数：将Path转换为Windows风格的字符串路径（使用反斜杠作为分隔符）
@@ -46,7 +46,11 @@ fn sanitize_flag(flag: &str) -> String {
 /// 用于解决 project_dir + ../../file.c 的路径计算
 fn get_clean_absolute_path(base: &Path, rel: &Path) -> PathBuf {
     let mut result = base.to_path_buf();
-    for component in rel.components() {
+    
+    // 处理Windows绝对路径的特殊情况
+    // 当遇到完整的Windows绝对路径（盘符+根目录）时，需要正确组合
+    let mut components = rel.components();
+    while let Some(component) = components.next() {
         match component {
             Component::ParentDir => {
                 result.pop();
@@ -56,12 +60,21 @@ fn get_clean_absolute_path(base: &Path, rel: &Path) -> PathBuf {
             }
             Component::RootDir => {
                 // 如果遇到根目录（如Linux的 / 或 Windows 的 \），重置路径
-                // 注意：在Windows上处理盘符比较复杂，这里简化处理，假设是相对路径
                 result = PathBuf::from(component.as_os_str());
             }
             Component::Prefix(prefix) => {
-                 // Windows 盘符，重置路径
+                 // Windows 盘符，先设置盘符
                  result = PathBuf::from(prefix.as_os_str());
+                 // 检查下一个组件是否是根目录（\）
+                 if let Some(next_component) = components.next() {
+                     if let Component::RootDir = next_component {
+                         // 如果是，将根目录添加到盘符后面
+                         result.push(next_component);
+                     } else {
+                         // 否则，重新处理这个组件
+                         result.push(next_component);
+                     }
+                 }
             }
             Component::CurDir => {}
         }
@@ -369,7 +382,9 @@ pub fn generate_compile_commands(
         // 命令中使用处理过的路径（可能是短路径，也可能是绝对长路径）
         cmd.push(&src_path_for_cmd);
 
-        let command_str = cmd.join(" ");
+        // 对每个命令参数进行引号处理，防止空格导致命令解析错误
+        let quoted_cmd = cmd.iter().map(|&arg| quote_if_needed(arg)).collect::<Vec<_>>();
+        let command_str = quoted_cmd.join(" ");
         debug_println!("[DEBUG generator] Generated command: {}", command_str);
 
         debug_println!("[DEBUG generator] Creating compile command entry...");
@@ -600,8 +615,12 @@ pub fn generate_ninja_build(
         let obj_name = normalize_path(&obj_path_buf);
         let clean_src = normalize_path(src_path);
         
-        regular_obj_files.push(obj_name.clone());
-        src_to_obj_map.push((clean_src, obj_name));
+        // 对 Ninja 构建文件中的路径进行转义，处理空格和冒号
+        let escaped_obj_name = escape_ninja_path(&obj_name);
+        let escaped_src = escape_ninja_path(&clean_src);
+        
+        regular_obj_files.push(escaped_obj_name.clone());
+        src_to_obj_map.push((escaped_src, escaped_obj_name));
     }
     // === 结束新增逻辑 ===
 
@@ -649,7 +668,11 @@ pub fn generate_ninja_build(
                 normalize_path(&full_path)
             };
 
-            special_output_files.push(output_file.clone());
+            // 对 Ninja 构建文件中的路径进行转义，处理空格和冒号
+            let escaped_output_file = escape_ninja_path(&output_file);
+            let escaped_clean_file_path = escape_ninja_path(&clean_file_path);
+            
+            special_output_files.push(escaped_output_file.clone());
 
             let rule_name = format!(
                 "special_{}",
@@ -681,7 +704,7 @@ pub fn generate_ninja_build(
 
             ninja_content.push_str(&format!(
                 "build {}: {} {}\n",
-                output_file, rule_name, clean_file_path
+                escaped_output_file, rule_name, escaped_clean_file_path
             ));
             ninja_content.push_str("\n");
         }
@@ -712,6 +735,9 @@ pub fn generate_ninja_build(
             }
         }
     }
+    
+    // 对目标文件名进行 Ninja 路径转义处理
+    let escaped_target_name = escape_ninja_path(&target_name);
 
     // 生成主目标的构建规则
     if is_static_lib {
@@ -746,7 +772,7 @@ pub fn generate_ninja_build(
 
         ninja_content.push_str(&format!(
             "build {}: ar {}{}\n",
-            target_name,
+            escaped_target_name,
             regular_obj_files.join(" "),
             deps_str
         ));
@@ -814,7 +840,7 @@ pub fn generate_ninja_build(
 
         ninja_content.push_str(&format!(
             "build {}: link {}{}\n",
-            target_name,
+            escaped_target_name,
             regular_obj_files.join(" "),
             implicit_deps_str
         ));
@@ -829,7 +855,7 @@ pub fn generate_ninja_build(
     }
     ninja_content.push_str("\n");
 
-    ninja_content.push_str(&format!("default {}\n", target_name));
+    ninja_content.push_str(&format!("default {}\n", escaped_target_name));
 
     debug_println!("[DEBUG generator] Successfully generated ninja build file content");
     Ok(ninja_content)
@@ -911,6 +937,10 @@ mod tests {
         assert_eq!(normalize_str("path/to/file"), "path\\to\\file");
         // 测试 Windows 风格保持不变
         assert_eq!(normalize_str("path\\to\\file"), "path\\to\\file");
+        // 测试空字符串
+        assert_eq!(normalize_str(""), "");
+        // 测试单个斜杠
+        assert_eq!(normalize_str("/"), "\\");
     }
 
     #[test]
@@ -921,6 +951,11 @@ mod tests {
         assert_eq!(sanitize_flag("-L../libs"), "-L..\\libs");
         // 测试库文件
         assert_eq!(sanitize_flag("libs/libm.a"), "libs\\libm.a");
+        // 测试复杂路径
+        assert_eq!(sanitize_flag("../../libs/libfoo.a"), "..\\..\\libs\\libfoo.a");
+        // 测试非路径标志
+        assert_eq!(sanitize_flag("-g"), "-g");
+        assert_eq!(sanitize_flag("-O2"), "-O2");
     }
 
     #[test]
@@ -934,6 +969,20 @@ mod tests {
         let expected = PathBuf::from("C:\\Libs\\test.c");
         
         assert_eq!(abs, expected);
+        
+        // 测试绝对路径输入
+        let base = PathBuf::from("C:\\Project");
+        let rel = Path::new("C:\\Absolute\\Path\\file.c");
+        let abs = get_clean_absolute_path(&base, rel);
+        let expected = PathBuf::from("C:\\Absolute\\Path\\file.c");
+        assert_eq!(abs, expected);
+        
+        // 测试当前目录
+        let base = PathBuf::from("C:\\Project");
+        let rel = Path::new(".\\src\\main.c");
+        let abs = get_clean_absolute_path(&base, rel);
+        let expected = PathBuf::from("C:\\Project\\src\\main.c");
+        assert_eq!(abs, expected);
     }
     
     #[test]
@@ -946,18 +995,78 @@ mod tests {
         
         let ancestor = find_common_ancestor(&paths);
         assert_eq!(ancestor, PathBuf::from("C:\\Proj"));
+        
+        // 测试空路径列表
+        let paths: Vec<PathBuf> = vec![];
+        let ancestor = find_common_ancestor(&paths);
+        assert_eq!(ancestor, PathBuf::from("."));
+        
+        // 测试单一路径
+        let paths = vec![PathBuf::from("C:\\Proj\\src\\main.c")];
+        let ancestor = find_common_ancestor(&paths);
+        assert_eq!(ancestor, PathBuf::from("C:\\Proj\\src"));
+        
+        // 测试不同盘符
+        let paths = vec![
+            PathBuf::from("C:\\Proj\\src\\main.c"),
+            PathBuf::from("D:\\Other\\file.c"),
+        ];
+        let ancestor = find_common_ancestor(&paths);
+        assert_eq!(ancestor, PathBuf::from("."));
     }
     
     #[test]
-    fn test_normalize_unc() {
-        // 测试 \\?\UNC\ 路径修复
+    fn test_normalize_path() {
+        // 测试 UNC 路径修复
         let p = Path::new("\\\\?\\UNC\\Server\\Share\\File.c");
         assert_eq!(normalize_path(p), "\\\\Server\\Share\\File.c");
+        
+        // 测试普通路径
+        let p = Path::new("\\\\?\\C:\\Path\\File.c");
+        assert_eq!(normalize_path(p), "C:\\Path\\File.c");
+        
+        // 测试相对路径
+        let p = Path::new("path/to/file");
+        assert_eq!(normalize_path(p), "path\\to\\file");
+        
+        // 测试 Windows 风格路径
+        let p = Path::new("path\\to\\file");
+        assert_eq!(normalize_path(p), "path\\to\\file");
     }
 
     #[test]
-    fn test_normalize_clean() {
-        let p = Path::new("\\\\?\\C:\\Path\\File.c");
-        assert_eq!(normalize_path(p), "C:\\Path\\File.c");
+    fn test_get_clean_absolute_path_extended() {
+        // 测试多级相对路径
+        let base = PathBuf::from("C:\\Project\\src");
+        let rel = Path::new("..\\..\\Libs\\subdir\\test.c");
+        let abs = get_clean_absolute_path(&base, rel);
+        let expected = PathBuf::from("C:\\Libs\\subdir\\test.c");
+        assert_eq!(abs, expected);
+        
+        // 测试根目录路径
+        let base = PathBuf::from("C:\\Project");
+        let rel = Path::new("\\Windows\\System32");
+        let abs = get_clean_absolute_path(&base, rel);
+        let expected = PathBuf::from("\\Windows\\System32");
+        assert_eq!(abs, expected);
+    }
+
+    #[test]
+    fn test_find_common_ancestor_edge_cases() {
+        // 测试根目录
+        let paths = vec![
+            PathBuf::from("C:\\main.c"),
+            PathBuf::from("C:\\src\\utils.c"),
+        ];
+        let ancestor = find_common_ancestor(&paths);
+        assert_eq!(ancestor, PathBuf::from("C:\\"));
+        
+        // 测试相同路径
+        let paths = vec![
+            PathBuf::from("C:\\Proj\\src\\main.c"),
+            PathBuf::from("C:\\Proj\\src\\main.c"),
+        ];
+        let ancestor = find_common_ancestor(&paths);
+        assert_eq!(ancestor, PathBuf::from("C:\\Proj\\src"));
     }
 }

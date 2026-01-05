@@ -186,6 +186,21 @@ pub fn get_short_path<P: AsRef<Path>>(path: P) -> Result<String, Box<dyn std::er
     Ok(short_path)
 }
 
+/// 辅助函数：如果路径包含空格，则用引号包裹
+pub fn quote_if_needed(path: &str) -> String {
+    if path.contains(' ') {
+        format!("\"{}\"", path)
+    } else {
+        path.to_string()
+    }
+}
+
+/// 辅助函数：转义Ninja语法中的特殊字符（空格和冒号）
+pub fn escape_ninja_path(path: &str) -> String {
+    // Ninja 中空格转义为 $ ，冒号转义为 $:
+    path.replace(" ", "$ ").replace(":", "$:")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

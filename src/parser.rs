@@ -252,8 +252,24 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
     // 合并Project/Linker库和Build/Target/Linker库，Build/Target/Linker库放最后
     linker_libs = [linker_libs, build_target_linker_libs].concat();
 
-    let options_str = global_cflags.join(" ");
-    let includes_str = include_dirs.join(" ");
+    // 对每个编译选项和include路径进行引号处理，防止空格导致命令解析错误
+    let quoted_global_cflags: Vec<_> = global_cflags.iter().map(|opt| {
+        if opt.contains(' ') {
+            format!("\"{}\"", opt)
+        } else {
+            opt.clone()
+        }
+    }).collect();
+    let quoted_include_dirs: Vec<_> = include_dirs.iter().map(|dir| {
+        if dir.contains(' ') {
+            format!("\"{}\"", dir)
+        } else {
+            dir.clone()
+        }
+    }).collect();
+    
+    let options_str = quoted_global_cflags.join(" ");
+    let includes_str = quoted_include_dirs.join(" ");
 
     let toolchain = ToolchainConfig::from_compiler_id(&compiler_id)
         .unwrap_or_else(|| {
