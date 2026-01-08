@@ -683,23 +683,42 @@ pub fn generate_ninja_build(
                     .replace("\\", "_")
                     .replace(":", "_")
             );
-            
+
             // 如果构建命令为空，生成一个创建空.o文件的命令
             let final_command = if processed_cmd.is_empty() {
                 // 在Windows上创建空文件的命令：先创建目录，再创建文件
                 let output_path = Path::new(&output_file);
                 let output_dir = output_path.parent().unwrap_or(Path::new("."));
                 let output_dir_str = normalize_path(output_dir);
-                
+
                 // 使用mkdir命令创建目录（如果不存在），然后创建空文件
                 // 注意：ninja在Windows上使用cmd.exe执行命令，所以需要用cmd /c来运行多个命令
                 format!("cmd /c (mkdir {} >nul 2>&1) & (type nul > {})", output_dir_str, output_file)
             } else {
                 processed_cmd
             };
-            
+
+            // 检查是否是编译命令（包含编译器），如果是则添加依赖跟踪
+            let is_compile_command = final_command.contains(&compiler) ||
+                                   final_command.contains("gcc") ||
+                                   final_command.contains("g++") ||
+                                   final_command.contains("clang") ||
+                                   final_command.contains("clang++");
+
             ninja_content.push_str(&format!("rule {}\n", rule_name));
-            ninja_content.push_str(&format!("  command = {}\n", final_command));
+
+            if is_compile_command {
+                // 为编译命令添加依赖跟踪
+                // 需要确保 -MMD -MF $out.d 是在编译器之后添加的，但要在输入文件之前
+                let modified_command = insert_dependency_flags(final_command, &compiler);
+
+                ninja_content.push_str(&format!("  command = {}\n", modified_command));
+                ninja_content.push_str("  depfile = $out.d\n");
+                ninja_content.push_str("  deps = gcc\n");
+            } else {
+                // 非编译命令，不添加依赖跟踪
+                ninja_content.push_str(&format!("  command = {}\n", final_command));
+            }
             ninja_content.push_str("\n");
 
             ninja_content.push_str(&format!(
@@ -859,6 +878,58 @@ pub fn generate_ninja_build(
 
     debug_println!("[DEBUG generator] Successfully generated ninja build file content");
     Ok(ninja_content)
+}
+
+/// 辅助函数：查找编译器在命令字符串中的位置
+fn find_compiler_position(command: &str, compiler: &str) -> Option<usize> {
+    // 首先尝试精确匹配编译器路径
+    if let Some(pos) = command.find(compiler) {
+        return Some(pos);
+    }
+
+    // 如果精确匹配失败，尝试匹配编译器名称（如 gcc, g++, clang 等）
+    let compiler_variants = [
+        "gcc", "g++", "clang", "clang++",
+        &compiler.replace("riscv32-elf-", "")
+    ];
+
+    for variant in &compiler_variants {
+        if variant.is_empty() { continue; }
+        if let Some(pos) = command.find(variant) {
+            // 确保匹配的是独立的单词（前后是空格或边界）
+            let start_ok = pos == 0 || command.chars().nth(pos - 1).unwrap().is_whitespace();
+            let end_ok = pos + variant.len() == command.len() ||
+                        command.chars().nth(pos + variant.len()).unwrap().is_whitespace();
+
+            if start_ok && end_ok {
+                return Some(pos);
+            }
+        }
+    }
+
+    None
+}
+
+/// 辅助函数：在编译命令中插入依赖跟踪标志
+fn insert_dependency_flags(mut command: String, compiler: &str) -> String {
+    // 检查命令中是否包含 -c 参数
+    let has_c_flag = command.contains(" -c ") || command.ends_with(" -c");
+
+    if !has_c_flag {
+        // 如果没有 -c 参数，需要添加它
+        // 通常在编译器之后添加 -c 参数
+        if let Some(pos) = find_compiler_position(&command, compiler) {
+            let compiler_end = pos + compiler.len();
+            let (before_compiler, after_compiler) = command.split_at(compiler_end);
+            command = format!("{} -c {}", before_compiler, after_compiler.trim_start());
+        } else {
+            // 如果找不到编译器，简单地在末尾添加 -c
+            command = format!("{} -c", command);
+        }
+    }
+
+    // 在命令末尾添加 -MMD -MF $out.d 依赖跟踪标志
+    format!("{} -MMD -MF $out.d", command)
 }
 
 /// 生成构建脚本文件内容
@@ -1060,7 +1131,7 @@ mod tests {
         ];
         let ancestor = find_common_ancestor(&paths);
         assert_eq!(ancestor, PathBuf::from("C:\\"));
-        
+
         // 测试相同路径
         let paths = vec![
             PathBuf::from("C:\\Proj\\src\\main.c"),
@@ -1068,5 +1139,36 @@ mod tests {
         ];
         let ancestor = find_common_ancestor(&paths);
         assert_eq!(ancestor, PathBuf::from("C:\\Proj\\src"));
+    }
+
+    #[test]
+    fn test_find_compiler_position() {
+        // 测试编译器位置查找
+        let cmd = "riscv32-elf-gcc -I/path/to/include -c source.c -o object.o";
+        let pos = find_compiler_position(cmd, "riscv32-elf-gcc");
+        assert_eq!(pos, Some(0));
+
+        let cmd = "gcc -I/path/to/include -c source.c -o object.o";
+        let pos = find_compiler_position(cmd, "riscv32-elf-gcc");
+        assert_eq!(pos, Some(0)); // Should match "gcc" as a compiler variant
+
+        let cmd = "clang++ -std=c++11 -c main.cpp -o main.o";
+        let pos = find_compiler_position(cmd, "riscv32-elf-gcc");
+        assert_eq!(pos, Some(0)); // Should match "clang++" as a compiler variant
+    }
+
+    #[test]
+    fn test_insert_dependency_flags() {
+        // 测试插入依赖标志
+        let cmd = "riscv32-elf-gcc -I/path/to/include -c source.c -o obj.o";
+        let result = insert_dependency_flags(cmd.to_string(), "riscv32-elf-gcc");
+        assert!(result.contains("-MMD -MF $out.d"));
+        assert!(result.contains("-c"));
+
+        // 测试没有 -c 标志的命令
+        let cmd = "riscv32-elf-gcc -I/path/to/include source.c -o obj.o";
+        let result = insert_dependency_flags(cmd.to_string(), "riscv32-elf-gcc");
+        assert!(result.contains("-MMD -MF $out.d"));
+        assert!(result.contains("-c"));
     }
 }
