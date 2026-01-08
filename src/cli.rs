@@ -109,9 +109,17 @@ pub fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     }
 
     let cbp_path = PathBuf::from(&args[1]);
-    if !cbp_path.is_file() {
-        eprintln!("File not found: {}", cbp_path.display());
-        std::process::exit(1);
+    match std::fs::metadata(&cbp_path) {
+        Ok(metadata) => {
+            if !metadata.is_file() {
+                eprintln!("Path is not a file: {}", cbp_path.display());
+                std::process::exit(1);
+            }
+        }
+        Err(_) => {
+            eprintln!("File not found: {}", cbp_path.display());
+            std::process::exit(1);
+        }
     }
 
     let output_dir = if args.len() == 3 {

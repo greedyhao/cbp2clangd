@@ -338,7 +338,7 @@ pub fn generate_compile_commands(
         "[DEBUG generator] Starting to process {} source files...",
         project_info.source_files.len()
     );
-    let mut compile_commands = Vec::new();
+    let mut compile_commands = Vec::with_capacity(project_info.source_files.len());
     for (index, src) in project_info.source_files.iter().enumerate() {
         debug_println!(
             "[DEBUG generator] Processing file {}/{}: {}",
@@ -404,11 +404,12 @@ pub fn generate_compile_commands(
 
 /// 辅助函数：计算 target 相对于 base 的相对路径
 fn compute_relative_path(target: &Path, base: &Path) -> Option<PathBuf> {
-    let target_canon = target.canonicalize().ok()?;
-    let base_canon = base.canonicalize().ok()?;
+    // 使用逻辑路径计算替代 canonicalize，避免网络驱动器问题
+    let target_abs = crate::utils::compute_absolute_path(target).ok()?;
+    let base_abs = crate::utils::compute_absolute_path(base).ok()?;
 
-    let mut ita = target_canon.components();
-    let mut itb = base_canon.components();
+    let mut ita = target_abs.components();
+    let mut itb = base_abs.components();
     let mut comps: Vec<Component> = vec![];
 
     loop {
@@ -729,6 +730,7 @@ pub fn generate_ninja_build(
         }
 
     // 构建部分 - 普通源文件
+    ninja_content.reserve(src_to_obj_map.len() * 100); // Pre-allocate space for build rules
     for (src, obj) in src_to_obj_map {
         ninja_content.push_str(&format!("build {}: cc {}\n", obj, src));
         ninja_content.push_str(&format!("  flags = {}\n", base_flags.join(" ")));
