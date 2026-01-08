@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4] - 2026-01-08
+### Added
+- 为特殊格式文件添加 -MMD -MF 依赖文件生成，支持头文件修改检测
+
 ## [1.2.3] - 2026-01-05
 ### Fixed
 - 修复网络路径的处理问题
