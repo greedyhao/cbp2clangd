@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.6] - 2026-01-10
+### Added
+- .clangd 增加合并功能
+
+### Fixed
+- 修复target_output文件路径问题
+
 ## [1.2.5] - 2026-01-08
 ### Fixed
 - 改进文件路径检查逻辑，避免潜在错误
