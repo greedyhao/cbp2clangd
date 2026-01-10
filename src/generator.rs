@@ -2,7 +2,7 @@ use crate::config::ToolchainConfig;
 use crate::debug_println;
 use crate::models::CompileCommand;
 use crate::parser::ProjectInfo;
-use crate::utils::{escape_ninja_path, get_short_path, quote_if_needed};
+use crate::utils::{escape_ninja_path, get_clean_absolute_path, get_short_path, quote_if_needed};
 use std::path::{Component, Path, PathBuf};
 
 /// 辅助函数：将Path转换为Windows风格的字符串路径（使用反斜杠作为分隔符）
@@ -42,45 +42,6 @@ fn sanitize_flag(flag: &str) -> String {
     flag.replace("/", "\\")
 }
 
-/// 辅助函数：逻辑上解析绝对路径（不依赖文件系统存在性，仅处理路径组件）
-/// 用于解决 project_dir + ../../file.c 的路径计算
-fn get_clean_absolute_path(base: &Path, rel: &Path) -> PathBuf {
-    let mut result = base.to_path_buf();
-    
-    // 处理Windows绝对路径的特殊情况
-    // 当遇到完整的Windows绝对路径（盘符+根目录）时，需要正确组合
-    let mut components = rel.components();
-    while let Some(component) = components.next() {
-        match component {
-            Component::ParentDir => {
-                result.pop();
-            }
-            Component::Normal(c) => {
-                result.push(c);
-            }
-            Component::RootDir => {
-                // 如果遇到根目录（如Linux的 / 或 Windows 的 \），重置路径
-                result = PathBuf::from(component.as_os_str());
-            }
-            Component::Prefix(prefix) => {
-                 // Windows 盘符，先设置盘符
-                 result = PathBuf::from(prefix.as_os_str());
-                 // 检查下一个组件是否是根目录（\）
-                 if let Some(next_component) = components.next() {
-                     if let Component::RootDir = next_component {
-                         // 如果是，将根目录添加到盘符后面
-                         result.push(next_component);
-                     } else {
-                         // 否则，重新处理这个组件
-                         result.push(next_component);
-                     }
-                 }
-            }
-            Component::CurDir => {}
-        }
-    }
-    result
-}
 
 /// 辅助函数：计算一组路径的共同祖先目录
 fn find_common_ancestor(paths: &[PathBuf]) -> PathBuf {
@@ -554,6 +515,11 @@ pub fn generate_ninja_build(
     // 提前计算常用的标准化路径，避免重复计算
     let clean_obj_dir = normalize_path(Path::new(&project_info.object_output));
 
+    // [FIX] 新增：计算 TARGET_OUTPUT_DIR (基于 output 文件的父目录)
+    let output_path = Path::new(&project_info.output);
+    let target_output_dir = output_path.parent().unwrap_or(Path::new("."));
+    let clean_target_output_dir = normalize_path(target_output_dir);
+
     // 构建基础编译器标志
     let mut base_flags: Vec<String> = Vec::new();
     for flag in &project_info.global_cflags {
@@ -643,8 +609,9 @@ pub fn generate_ninja_build(
             processed_cmd = processed_cmd.replace("$options", &base_flags.join(" "));
             processed_cmd = processed_cmd.replace("$includes", &clean_includes);
             processed_cmd = processed_cmd.replace("$file", &clean_file_path);
+            // [FIX] 区分 OBJECT_DIR 和 OUTPUT_DIR
             processed_cmd = processed_cmd.replace("$(TARGET_OBJECT_DIR)", &clean_obj_dir);
-            processed_cmd = processed_cmd.replace("$(TARGET_OUTPUT_DIR)", &clean_obj_dir);
+            processed_cmd = processed_cmd.replace("$(TARGET_OUTPUT_DIR)", &clean_target_output_dir);
 
             // 提取输出文件名
             let output_file = if let Some(output_pos) = processed_cmd.find("-o ") {
@@ -826,6 +793,7 @@ pub fn generate_ninja_build(
         // 添加链接器选项
         for opt in &project_info.linker_options {
             let replaced_opt = opt.replace("$(TARGET_OBJECT_DIR)", &clean_obj_dir);
+            let replaced_opt = replaced_opt.replace("$(TARGET_OUTPUT_DIR)", &clean_target_output_dir);
             // Linker options 可能包含 -Map=output/path.map 之类的，需要转换路径分隔符
             pre_link_flags.push(sanitize_flag(&replaced_opt));
         }
@@ -1172,5 +1140,50 @@ mod tests {
         let result = insert_dependency_flags(cmd.to_string(), "riscv32-elf-gcc");
         assert!(result.contains("-MMD -MF $out.d"));
         assert!(result.contains("-c"));
+    }
+
+    #[test]
+    fn test_variable_substitution_logic() {
+        use crate::models::SpecialFileBuildInfo;
+        use crate::parser::ProjectInfo;
+
+        // 模拟 ProjectInfo
+        let project = ProjectInfo {
+            // ... 其他字段填充默认值 ...
+            compiler_id: "gcc".to_string(),
+            project_name: "Test".to_string(),
+            global_cflags: vec![],
+            include_dirs: vec![],
+            source_files: vec![],
+            special_files: vec![
+                SpecialFileBuildInfo {
+                    filename: "script.ld".to_string(),
+                    compiler_id: "gcc".to_string(),
+                    // 测试目标：验证 TARGET_OUTPUT_DIR 和 TARGET_OBJECT_DIR 是否被正确替换
+                    build_command: "cp $file $(TARGET_OUTPUT_DIR)\\ && echo $(TARGET_OBJECT_DIR)".to_string(),
+                }
+            ],
+            prebuild_commands: vec![],
+            postbuild_commands: vec![],
+            march_info: crate::models::MarchInfo::default(),
+            object_output: "obj/Debug/".to_string(),     // 这是 OBJECT_DIR
+            output: "bin/Debug/app.elf".to_string(),     // 這是 OUTPUT_DIR 的文件
+            linker_options: vec![],
+            linker_libs: vec![],
+            linker_lib_dirs: vec![],
+            linker_type: "gcc".to_string(),
+        };
+
+        let toolchain = crate::ToolchainConfig::from_compiler_id("riscv32-v2").unwrap();
+        let project_dir = std::path::PathBuf::from(".");
+
+        // 生成 Ninja 内容
+        let ninja_content = generate_ninja_build(&project, &project_dir, &toolchain).unwrap();
+
+        // 断言验证
+        // 1. OUTPUT_DIR 应该是 bin\Debug (app.elf 的父目录)
+        assert!(ninja_content.contains("bin\\Debug"));
+        // 2. OBJECT_DIR 应该是 obj\Debug
+        assert!(ninja_content.contains("obj\\Debug"));
     }
 }

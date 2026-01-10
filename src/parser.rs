@@ -440,31 +440,58 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
                 .children()
                 .filter(|n| n.tag_name().name() == "Option")
             {
-                if let Some(obj_output) = option_node.attribute("object_output") {
-                    object_output = obj_output.to_string();
+                if let Some(obj_out) = option_node.attribute("object_output") {
+                    // 只设置一次，使用第一个target的值
+                    if object_output.is_empty() {
+                        object_output = obj_out.to_string();
+                    }
                 }
+
                 if let Some(out) = option_node.attribute("output") {
-                    output = out.to_string();
+                    // 只设置一次，使用第一个target的值
+                    if output.is_empty() {
+                        output = out.to_string();
+                    }
                 }
             }
-            // 找到一个就够了，跳出循环
-            if !object_output.is_empty() && !output.is_empty() {
+            // 找到第一个target的值后就退出
+            if !output.is_empty() {
                 break;
             }
         }
-        // 找到一个就够了，跳出循环
-        if !object_output.is_empty() && !output.is_empty() {
+        // 找到第一个target的值后就退出
+        if !output.is_empty() {
             break;
         }
     }
 
-    // 如果没有找到object_output，使用默认值
-    if object_output.is_empty() {
-        object_output = "./".to_string();
-    }
     // 如果没有找到output，使用默认值
     if output.is_empty() {
         output = format!("{}.elf", project_name);
+    }
+
+    // 如果没有找到object_output，使用output的目录路径作为默认值
+    if object_output.is_empty() {
+        let output_path = std::path::Path::new(&output);
+        
+        // 修改：处理 parent() 返回 Some("") 的情况
+        if let Some(parent) = output_path.parent() {
+            let parent_str = parent.to_string_lossy().to_string();
+            
+            // 关键修复：如果父目录是空字符串（意味着文件在当前目录），显式设为 "./"
+            if parent_str.is_empty() {
+                object_output = "./".to_string();
+            } else {
+                object_output = parent_str;
+                // 确保路径以分隔符结尾，如果有的话
+                if !object_output.ends_with('/') && !object_output.ends_with('\\') {
+                    object_output.push(std::path::MAIN_SEPARATOR);
+                }
+            }
+        } else {
+            // 如果没有父目录（虽然对于文件路径通常都会返回 Some），则使用当前目录
+            object_output = "./".to_string();
+        }
     }
 
     Ok(ProjectInfo {
@@ -526,23 +553,26 @@ mod tests {
     #[test]
     fn test_parse_basic_project() {
         let project = parse_cbp_file(TEST_XML).expect("Failed to parse valid XML");
-        
+
         // 验证基本信息
         assert_eq!(project.project_name, "TestProject");
         assert_eq!(project.compiler_id, "riscv32-v2");
-        
+
         // 验证源文件列表
         assert!(project.source_files.contains(&"main.c".to_string()));
         assert!(project.source_files.contains(&"utils.c".to_string()));
-        
+
         // 验证 include 路径 (注意解析器里添加了 -I 前缀)
         assert!(project.include_dirs.contains(&"-Isrc/include".to_string()));
-        
+
         // 验证全局 Flag
         assert!(project.global_cflags.contains(&"-Wall".to_string()));
-        
+
         // 验证 Output 路径
         assert_eq!(project.output, "bin/Debug/TestProject.elf");
+
+        // 验证 Object Output 目录 (TARGET_OUTPUT_DIR) 使用 object_output 属性的值
+        assert_eq!(project.object_output, "obj/Debug/"); // TARGET_OUTPUT_DIR 应该是 object_output 属性的值
     }
 
     #[test]
@@ -560,12 +590,52 @@ mod tests {
             </Project>
         </CodeBlocks_project_file>
         "#;
-        
+
         // 现在这里应该返回 Ok，而不是 Err
         let project = parse_cbp_file(xml).expect("Failed to parse project with custom march");
-        
+
         assert_eq!(project.march_info.full_march, "-march=rv32imac_xabcd");
         assert!(project.march_info.has_custom_extension);
         assert_eq!(project.march_info.base_march, Some("-march=rv32imac".to_string()));
+    }
+
+    #[test]
+    fn test_parse_object_output_from_output_dir() {
+        let xml = r#"
+        <CodeBlocks_project_file>
+            <FileVersion major="1" minor="6" />
+            <Project>
+                <Option title="TestProject" />
+                <Option compiler="riscv32-v2" />
+                <Build>
+                    <Target title="Debug">
+                        <Option output="bin/Debug/TestProject.elf" />
+                        <Option object_output="obj/Debug/" />
+                        <Compiler>
+                            <Add option="-g" />
+                        </Compiler>
+                        <Linker>
+                            <Add library="m" />
+                        </Linker>
+                    </Target>
+                </Build>
+                <Compiler>
+                    <Add option="-Wall" />
+                    <Add directory="src/include" />
+                </Compiler>
+                <Unit filename="main.c">
+                    <Option compilerVar="CC" />
+                </Unit>
+            </Project>
+        </CodeBlocks_project_file>
+        "#;
+
+        let project = parse_cbp_file(xml).expect("Failed to parse valid XML");
+
+        // 验证 output 路径
+        assert_eq!(project.output, "bin/Debug/TestProject.elf");
+
+        // 验证 object_output 现在应该等于指定的 object_output 值，而不是从 output 推导
+        assert_eq!(project.object_output, "obj/Debug/"); // TARGET_OUTPUT_DIR 应该是显式指定的值
     }
 }

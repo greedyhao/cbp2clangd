@@ -201,6 +201,46 @@ pub fn escape_ninja_path(path: &str) -> String {
     path.replace(" ", "$ ").replace(":", "$:")
 }
 
+/// 辅助函数：逻辑上解析绝对路径（不依赖文件系统存在性，仅处理路径组件）
+/// 用于解决 project_dir + ../../file.c 的路径计算
+pub fn get_clean_absolute_path(base: &Path, rel: &Path) -> PathBuf {
+    let mut result = base.to_path_buf();
+
+    // 处理Windows绝对路径的特殊情况
+    // 当遇到完整的Windows绝对路径（盘符+根目录）时，需要正确组合
+    let mut components = rel.components();
+    while let Some(component) = components.next() {
+        match component {
+            Component::ParentDir => {
+                result.pop();
+            }
+            Component::Normal(c) => {
+                result.push(c);
+            }
+            Component::RootDir => {
+                // 如果遇到根目录（如Linux的 / 或 Windows 的 \），重置路径
+                result = PathBuf::from(component.as_os_str());
+            }
+            Component::Prefix(prefix) => {
+                 // Windows 盘符，先设置盘符
+                 result = PathBuf::from(prefix.as_os_str());
+                 // 检查下一个组件是否是根目录（\）
+                 if let Some(next_component) = components.next() {
+                     if let Component::RootDir = next_component {
+                         // 如果是，将根目录添加到盘符后面
+                         result.push(next_component);
+                     } else {
+                         // 否则，重新处理这个组件
+                         result.push(next_component);
+                     }
+                 }
+            }
+            Component::CurDir => {}
+        }
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

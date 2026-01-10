@@ -665,9 +665,9 @@ fn test_parse_missing_object_output() {
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
-    // 验证自定义output被使用，默认object_output被使用
+    // 验证自定义output被使用，object_output是output的目录路径
     assert_eq!(project_info.output, "custom_output.elf", "应该使用自定义output");
-    assert_eq!(project_info.object_output, "./", "应该使用默认object_output：./");
+    assert_eq!(project_info.object_output, "./", "应该使用output的目录路径作为object_output");
 }
 
 #[test]
