@@ -59,6 +59,7 @@ fn find_common_ancestor(paths: &[PathBuf]) -> PathBuf {
 pub fn generate_clangd_config(
     project_info: &ProjectInfo,
     toolchain: &ToolchainConfig,
+    no_header_insertion: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     debug_println!("[DEBUG generator] Starting to generate .clangd config...");
 
@@ -148,6 +149,11 @@ pub fn generate_clangd_config(
             debug_println!("[DEBUG generator] Added remove flag: {}", flag);
             content.push_str(&format!("    - {}\n", flag));
         }
+    }
+
+    // 如果设置了no_header_insertion，则添加Completion配置
+    if no_header_insertion {
+        content.push_str("\nCompletion:\n  HeaderInsertion: Never\n");
     }
 
     debug_println!("[DEBUG generator] Successfully generated .clangd config content");

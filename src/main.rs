@@ -245,7 +245,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let clangd_path = workspace_root.join(".clangd");
 
     // A. 生成公共头部 (Base Config)
-    let base_config = generate_clangd_config(&project_info, &toolchain)?;
+    let base_config = generate_clangd_config(&project_info, &toolchain, args.no_header_insertion)?;
 
     // B. 生成项目专属片段 (Fragment)
     let (current_path_match, fragment_content) = generate_clangd_fragment(
