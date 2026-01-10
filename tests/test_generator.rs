@@ -144,3 +144,59 @@ fn test_generate_ninja_build_with_target_macros() {
         "宏定义应该被添加到flags中"
     );
 }
+
+#[test]
+fn test_target_output_dir_path_separator() {
+    // 创建一个包含特殊文件的XML内容，用于测试 TARGET_OUTPUT_DIR 和 TARGET_OBJECT_DIR 变量
+    let xml_content = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_project_file>
+    <FileVersion major="1" minor="6" />
+    <Project>
+        <Option title="TestProject" />
+        <Option compiler="riscv32-v2" />
+        <Build>
+            <Target title="Debug">
+                <Option output="Output/bin/app.rv32" prefix_auto="1" suffix_auto="1" />
+                <Option object_output="obj/Debug/" />
+                <Compiler>
+                    <Add option="-g" />
+                </Compiler>
+            </Target>
+        </Build>
+        <Unit filename="main.c">
+            <Option compiler="riscv32-v2" />
+            <Option Excluded="1"/>
+        </Unit>
+        <Unit filename="special_file.S">
+            <Option compiler="riscv32-v2" />
+            <Option target="Debug" />
+            <Option Excluded="0"/>
+            <Option compiler="riscv32-v2" buildCommand="copy $(TARGET_OUTPUT_DIR)app.rv32 $(TARGET_OUTPUT_DIR)app_backup.rv32" use="1"/>
+        </Unit>
+    </Project>
+</CodeBlocks_project_file>"#;
+
+    let project_info = parse_cbp_file(xml_content).unwrap();
+    let toolchain = ToolchainConfig::from_compiler_id("riscv32-v2").unwrap();
+
+    let result = generate_ninja_build(&project_info, Path::new("."), &toolchain);
+    assert!(result.is_ok());
+    let ninja_content = result.unwrap();
+
+    // 打印生成的ninja内容，以便调试
+    println!("Generated ninja content for path separator test:\n{}", ninja_content);
+
+    // 检查 TARGET_OUTPUT_DIR 变量是否被正确替换，并且路径包含分隔符
+    // 确保输出路径是 "Output\\bin\\app.rv32" 而不是 "Output\\binapp.rv32"
+    assert!(
+        ninja_content.contains(r"Output\bin\app.rv32"),
+        "TARGET_OUTPUT_DIR 应该被正确替换，路径应该包含分隔符"
+    );
+
+    // 检查 TARGET_OBJECT_DIR 变量是否被正确替换，并且路径包含分隔符
+    // 确保对象路径是 "obj\\Debug\\" 而不是 "obj\\Debug"（如果在特殊命令中使用的话）
+    assert!(
+        ninja_content.contains(r"obj\Debug\"),
+        "TARGET_OBJECT_DIR 应该被正确替换，路径应该包含分隔符"
+    );
+}

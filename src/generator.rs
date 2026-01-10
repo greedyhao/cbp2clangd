@@ -513,12 +513,26 @@ pub fn generate_ninja_build(
     };
 
     // 提前计算常用的标准化路径，避免重复计算
-    let clean_obj_dir = normalize_path(Path::new(&project_info.object_output));
+    let clean_obj_dir = {
+        let mut path = normalize_path(Path::new(&project_info.object_output));
+        // 确保路径以分隔符结尾，以便与文件名正确连接
+        if !path.ends_with('\\') && !path.ends_with('/') {
+            path.push('\\');
+        }
+        path
+    };
 
     // [FIX] 新增：计算 TARGET_OUTPUT_DIR (基于 output 文件的父目录)
     let output_path = Path::new(&project_info.output);
     let target_output_dir = output_path.parent().unwrap_or(Path::new("."));
-    let clean_target_output_dir = normalize_path(target_output_dir);
+    let clean_target_output_dir = {
+        let mut path = normalize_path(target_output_dir);
+        // 确保路径以分隔符结尾，以便与文件名正确连接
+        if !path.ends_with('\\') && !path.ends_with('/') {
+            path.push('\\');
+        }
+        path
+    };
 
     // 构建基础编译器标志
     let mut base_flags: Vec<String> = Vec::new();
