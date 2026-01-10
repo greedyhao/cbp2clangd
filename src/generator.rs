@@ -902,6 +902,154 @@ fn insert_dependency_flags(mut command: String, compiler: &str) -> String {
     format!("{} -MMD -MF $out.d", command)
 }
 
+/// 合并 .clangd 配置，只替换 CompileFlags 部分，保留其他配置
+pub fn merge_clangd_config(existing_content: &str, new_compile_flags: &str) -> String {
+    // 将现有内容按行分割
+    let lines: Vec<&str> = existing_content.lines().collect();
+
+    let mut result_lines = Vec::new();
+    let mut i = 0;
+    let mut found_global_compile_flags = false;
+
+    while i < lines.len() {
+        let line = lines[i];
+
+        // 检查是否是顶级的 CompileFlags 部分（即不是在 If 部分内的）
+        // 顶级部分：没有缩进或只有少量缩进（不足以成为子项）
+        if line.trim_start().starts_with("CompileFlags:") &&
+           (!line.starts_with("  ")) { // 顶级部分（没有缩进）
+            if !found_global_compile_flags {
+                // 第一次遇到全局 CompileFlags，用新的替换
+                result_lines.push(new_compile_flags);
+                found_global_compile_flags = true;
+
+                // 跳过原有的 CompileFlags 部分内容
+                i += 1;
+                while i < lines.len() {
+                    let next_line = lines[i];
+                    let trimmed = next_line.trim_start();
+
+                    // 检查是否是 CompileFlags 的子项（以缩进开始）
+                    if !trimmed.is_empty() &&
+                       (next_line.starts_with("  ") || next_line.starts_with('\t')) {
+                        // 这仍然是 CompileFlags 的一部分，跳过
+                        i += 1;
+                        continue;
+                    } else {
+                        // 不再是 CompileFlags 的一部分，结束跳过
+                        break;
+                    }
+                }
+                continue; // 不要添加原来的 CompileFlags 行
+            } else {
+                // 已经处理过全局 CompileFlags，跳过这个部分
+                i += 1;
+                while i < lines.len() {
+                    let next_line = lines[i];
+                    let trimmed = next_line.trim_start();
+
+                    if !trimmed.is_empty() &&
+                       (next_line.starts_with("  ") || next_line.starts_with('\t')) {
+                        i += 1;
+                        continue;
+                    } else {
+                        break;
+                    }
+                }
+                continue;
+            }
+        }
+
+        // 检查是否是 If 部分
+        if line.trim_start().starts_with("If:") {
+            result_lines.push(line);
+            i += 1;
+
+            // 处理 If 部分的内容
+            while i < lines.len() {
+                let current_line = lines[i];
+
+                // 检查是否是 If 部分内的 CompileFlags
+                if current_line.trim_start().starts_with("CompileFlags:") {
+                    // 跳过这个 CompileFlags 部分
+                    i += 1;
+                    while i < lines.len() {
+                        let nested_line = lines[i];
+                        let trimmed = nested_line.trim_start();
+
+                        // 检查是否是 CompileFlags 的子项
+                        if !trimmed.is_empty() &&
+                           (nested_line.starts_with("    ") || nested_line.starts_with("\t\t")) {
+                            i += 1;
+                            continue;
+                        } else {
+                            break;
+                        }
+                    }
+                    continue; // 不添加原来的 CompileFlags 部分
+                }
+
+                // 检查是否离开了 If 部分（遇到了新的顶级部分）
+                // 检查是否有缩进而且不是 If 部分的延续
+                let is_top_level = current_line.trim() != "" &&
+                                  !current_line.starts_with(' ') &&
+                                  !current_line.starts_with('\t');
+
+                let is_known_section = current_line.trim_start().starts_with("If:") ||
+                                      current_line.trim_start().starts_with("CompileFlags:") ||
+                                      current_line.trim_start().starts_with("Index:") ||
+                                      current_line.trim_start().starts_with("Completion:") ||
+                                      current_line.trim_start().starts_with("Diagnostics:") ||
+                                      current_line.trim_start().starts_with("Hover:") ||
+                                      current_line.trim_start().starts_with("InlayHints:") ||
+                                      current_line.trim_start().starts_with("MemoryUsage:") ||
+                                      current_line.trim_start().starts_with("PublishDiagnostics:") ||
+                                      current_line.trim_start().starts_with("WorkspaceSymbol:");
+
+                if is_top_level && is_known_section {
+                    // 这是新的顶级部分，离开 If 块
+                    break;
+                }
+
+                // 添加 If 部分的其他内容
+                result_lines.push(current_line);
+                i += 1;
+            }
+            continue;
+        }
+
+        // 添加非 CompileFlags 的行
+        result_lines.push(line);
+        i += 1;
+    }
+
+    // 如果没有找到全局 CompileFlags 部分，则在开头添加新的
+    if !found_global_compile_flags {
+        if !result_lines.is_empty() {
+            let mut new_content = new_compile_flags.to_string();
+            new_content.push('\n');
+            for line in result_lines {
+                new_content.push_str(line);
+                new_content.push('\n');
+            }
+            return new_content.trim_end().to_string();
+        } else {
+            return new_compile_flags.to_string();
+        }
+    }
+
+    // 重建内容
+    let mut result = String::new();
+    for (idx, line) in result_lines.iter().enumerate() {
+        result.push_str(line);
+        if idx < result_lines.len() - 1 {
+            result.push('\n');
+        }
+    }
+
+    result.trim_end().to_string()
+}
+
 /// 生成构建脚本文件内容
 pub fn generate_build_script(
     project_info: &ProjectInfo,
@@ -1185,5 +1333,61 @@ mod tests {
         assert!(ninja_content.contains("bin\\Debug"));
         // 2. OBJECT_DIR 应该是 obj\Debug
         assert!(ninja_content.contains("obj\\Debug"));
+    }
+
+    #[test]
+    fn test_merge_clangd_config_basic() {
+        let existing_content = "CompileFlags:\n  Add:\n    - -Iexisting/path\n    - -DEXISTING_FLAG\n\nCompletion:\n  detailedLabels: false";
+        let new_compile_flags = "CompileFlags:\n  Add:\n    - -Inew/path\n    - -DNEW_FLAG";
+
+        let result = merge_clangd_config(existing_content, new_compile_flags);
+
+        // 检查新的 CompileFlags 是否被添加
+        assert!(result.contains("-Inew/path"));
+        assert!(result.contains("-DNEW_FLAG"));
+
+        // 检查原有的 Completion 配置是否保留
+        assert!(result.contains("Completion:"));
+        assert!(result.contains("detailedLabels: false"));
+
+        // 检查旧的 CompileFlags 是否被移除
+        assert!(!result.contains("-Iexisting/path"));
+        assert!(!result.contains("-DEXISTING_FLAG"));
+    }
+
+    #[test]
+    fn test_merge_clangd_config_with_if_section() {
+        let existing_content = "CompileFlags:\n  Add:\n    - -Iexisting/path\n\nIf:\n  PathMatch: src/.*\nCompileFlags:\n  CompilationDatabase: existing/db/path\n\nCompletion:\n  detailedLabels: true";
+        let new_compile_flags = "CompileFlags:\n  Add:\n    - -Inew/path";
+
+        let result = merge_clangd_config(existing_content, new_compile_flags);
+
+        // 检查新的 CompileFlags 是否被添加（全局部分）
+        assert!(result.contains("-Inew/path"));
+
+        // 检查 If 部分中的 CompileFlags 是否被保留
+        assert!(result.contains("PathMatch: src/.*"));
+        assert!(result.contains("CompilationDatabase: existing/db/path"));
+
+        // 检查 Completion 配置是否保留
+        assert!(result.contains("Completion:"));
+        assert!(result.contains("detailedLabels: true"));
+    }
+
+    #[test]
+    fn test_merge_clangd_config_no_existing_compile_flags() {
+        let existing_content = "Completion:\n  detailedLabels: true\n\nDiagnostics:\n  unusedIncludes: false";
+        let new_compile_flags = "CompileFlags:\n  Add:\n    - -Inew/path";
+
+        let result = merge_clangd_config(existing_content, new_compile_flags);
+
+        // 检查新的 CompileFlags 是否被添加
+        assert!(result.contains("-Inew/path"));
+
+        // 检查原有的配置是否保留
+        assert!(result.contains("Completion:"));
+        assert!(result.contains("detailedLabels: true"));
+        assert!(result.contains("Diagnostics:"));
+        assert!(result.contains("unusedIncludes: false"));
     }
 }

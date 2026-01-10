@@ -11,6 +11,7 @@ pub use cli::parse_args;
 pub use config::ToolchainConfig;
 pub use generator::{
     generate_build_script, generate_clangd_config, generate_clangd_fragment, generate_compile_commands, generate_ninja_build,
+    merge_clangd_config,
 };
 pub use parser::parse_cbp_file;
 pub use utils::is_debug_mode;

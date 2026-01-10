@@ -246,7 +246,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // A. 生成公共头部 (Base Config)
     let base_config = generate_clangd_config(&project_info, &toolchain)?;
-    
+
     // B. 生成项目专属片段 (Fragment)
     let (current_path_match, fragment_content) = generate_clangd_fragment(
         &project_info,
@@ -268,16 +268,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 新文件：Header + Fragment
         final_parts.push(base_config);
     } else {
-        // 旧文件：分割处理
+        // 旧文件：使用新的合并逻辑，只替换 CompileFlags 部分，保留其他配置
+        debug_println!("[DEBUG] Merging .clangd config, preserving non-CompileFlags sections...");
+
+        // 分割现有内容以分别处理基本配置和片段
         let parts: Vec<&str> = existing_content.split("\n---").collect();
 
-        // 策略：始终更新头部为当前项目的生成配置 (或者保留旧的，这取决于是否希望"最后一次运行"决定公共配置)
-        // 鉴于用户说"公共部分需要靠 generate_clangd_config 生成"，我们这里选择用新生成的 Base Config 替换旧文件的头部
-        // 这样可以确保配置是最新的。
-        debug_println!("[DEBUG] Updating common config header...");
-        final_parts.push(base_config);
+        // 处理基本配置部分（第一部分）
+        let base_part = parts[0];
+        let merged_base_config = cbp2clangd::merge_clangd_config(base_part, &base_config);
+        final_parts.push(merged_base_config);
 
-        // 处理后续片段
+        // 处理片段部分（其余部分）
         for part in parts.iter().skip(1) {
             let trimmed_part = part.trim();
             // 如果片段的 PathMatch 与当前生成的不同，则保留；如果相同，则丢弃(稍后追加新的)
