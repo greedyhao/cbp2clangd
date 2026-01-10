@@ -50,6 +50,7 @@ cbp2clangd [--debug] [--test] [--linker <type>] [--ninja <path>] <cbp文件路�
 
 - `--debug`: 启用调试日志
 - `--test`: 启用测试模式，使用内置的 XML 内容
+- `--no-header-insertion`: 禁用 clangd 自动插入头文件功能，在 .clangd 配置中添加 `Completion: HeaderInsertion: Never`
 - `--linker <type>` 或 `-l <type>`: 指定链接器类型（gcc 或 ld，默认为 gcc）
 - `--ninja <path>` 或 `-n <path>`: 指定自定义 ninja 可执行文件路径
 - `<cbp文件路径>`: Code::Blocks 项目文件（.cbp）的路径
@@ -89,6 +90,18 @@ cbp2clangd -l ld app.cbp
 
 ```bash
 cbp2clangd --debug app.cbp
+```
+
+#### 示例 4：禁用 clangd 头文件自动插入
+
+```bash
+cbp2clangd --no-header-insertion app.cbp
+```
+
+使用此选项将在生成的 .clangd 配置文件中添加以下配置：
+```yaml
+Completion:
+  HeaderInsertion: Never
 ```
 
 ### 生成文件
