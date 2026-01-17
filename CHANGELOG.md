@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.8] - 2026-01-16
+### Added
+- 添加 SourceFileInfo 结构，用于保存普通源文件的编译和链接信息
+- 支持解析源文件的 compile 和 link 属性，控制编译和链接行为
+- 支持普通源文件只链接不编译，适用于 .o 文件已存在的情况
+- 特殊文件需要明确指定 compile="1"才编译，普通文件默认编译
+
+### Fixed
+- 修复了特殊文件编译命令没有运行的问题，确保所有 compile 为 true 的特殊文件都能正确触发编译
+
+### Changed
+- 修改了特殊文件的处理逻辑，将特殊文件输出作为隐式依赖添加到链接规则中，类似库文件的处理方式
+- 普通文件默认链接，特殊文件默认不链接
+- 更新了 README.md，添加了新功能的说明
+
 ## [1.2.7] - 2026-01-10
 ### Added
 - 添加 --no-header-insertion 命令行参数，用于在 .clangd 配置中禁用头文件自动插入功能
