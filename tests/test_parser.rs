@@ -36,7 +36,117 @@ fn test_parse_cbp_file() {
     assert_eq!(project_info.project_name, "libchatbot");
     assert_eq!(project_info.output, "Output/bin/chatbot.a");
     assert_eq!(project_info.source_files.len(), 1);
-    assert_eq!(project_info.source_files[0], "src/chatbot.c");
+    assert_eq!(project_info.source_files[0].filename, "src/chatbot.c");
+    assert_eq!(project_info.source_files[0].compile, true);
+    assert_eq!(project_info.source_files[0].link, true);
+}
+
+#[test]
+fn test_parse_unit_compile_link_attributes() {
+    // 创建一个包含compile和link属性的XML内容
+    let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<CodeBlocks_project_file>
+    <FileVersion major="1" minor="6" />
+    <Project>
+        <Option title="TestProject" />
+        <Option compiler="riscv32-v2" />
+        <Build>
+            <Target title="Debug">
+                <Option output="Output/bin/test.elf" prefix_auto="1" extension_auto="0" />
+                <Option object_output="Output/obj/Debug" />
+            </Target>
+        </Build>
+        <!-- 测试普通源文件的compile和link属性 -->
+        <Unit filename="src/main.c">
+            <Option compile="1" link="1" />
+        </Unit>
+        <Unit filename="src/only_compile.c">
+            <Option compile="1" link="0" />
+        </Unit>
+        <Unit filename="src/only_link.c">
+            <Option compile="0" link="1" />
+        </Unit>
+        <!-- 测试特殊文件的compile和link属性 -->
+        <Unit filename="src/special.asm">
+            <Option compile="1" link="1" buildCommand="as $file -o $object" use="1" />
+        </Unit>
+        <Unit filename="src/special_no_link.asm">
+            <Option compile="1" link="0" buildCommand="as $file -o $object" use="1" />
+        </Unit>
+        <Unit filename="src/special_no_compile.asm">
+            <Option compile="0" link="1" buildCommand="as $file -o $object" use="1" />
+        </Unit>
+    </Project>
+</CodeBlocks_project_file>"#;
+
+    let result = parse_cbp_file(xml_content);
+    assert!(result.is_ok());
+    let project_info = result.unwrap();
+
+    // 验证源文件数量
+    assert_eq!(project_info.source_files.len(), 3, "应该有3个普通源文件");
+    assert_eq!(project_info.special_files.len(), 3, "应该有3个特殊文件");
+
+    // 验证普通源文件的compile和link属性
+    let main_file = project_info.source_files.iter().find(|f| f.filename == "src/main.c").expect("应该包含src/main.c");
+    assert_eq!(main_file.compile, true, "src/main.c的compile属性应该为true");
+    assert_eq!(main_file.link, true, "src/main.c的link属性应该为true");
+
+    let only_compile_file = project_info.source_files.iter().find(|f| f.filename == "src/only_compile.c").expect("应该包含src/only_compile.c");
+    assert_eq!(only_compile_file.compile, true, "src/only_compile.c的compile属性应该为true");
+    assert_eq!(only_compile_file.link, false, "src/only_compile.c的link属性应该为false");
+
+    let only_link_file = project_info.source_files.iter().find(|f| f.filename == "src/only_link.c").expect("应该包含src/only_link.c");
+    assert_eq!(only_link_file.compile, false, "src/only_link.c的compile属性应该为false");
+    assert_eq!(only_link_file.link, true, "src/only_link.c的link属性应该为true");
+
+    // 验证特殊文件的compile和link属性
+    let special_file = project_info.special_files.iter().find(|f| f.filename == "src/special.asm").expect("应该包含src/special.asm");
+    assert_eq!(special_file.compile, true, "src/special.asm的compile属性应该为true");
+    assert_eq!(special_file.link, true, "src/special.asm的link属性应该为true");
+
+    let special_no_link_file = project_info.special_files.iter().find(|f| f.filename == "src/special_no_link.asm").expect("应该包含src/special_no_link.asm");
+    assert_eq!(special_no_link_file.compile, true, "src/special_no_link.asm的compile属性应该为true");
+    assert_eq!(special_no_link_file.link, false, "src/special_no_link.asm的link属性应该为false");
+
+    let special_no_compile_file = project_info.special_files.iter().find(|f| f.filename == "src/special_no_compile.asm").expect("应该包含src/special_no_compile.asm");
+    assert_eq!(special_no_compile_file.compile, false, "src/special_no_compile.asm的compile属性应该为false");
+    assert_eq!(special_no_compile_file.link, true, "src/special_no_compile.asm的link属性应该为true");
+}
+
+#[test]
+fn test_parse_special_files_compile_default() {
+    // 创建一个特殊文件，没有显式指定compile属性的XML内容
+    let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<CodeBlocks_project_file>
+    <FileVersion major="1" minor="6" />
+    <Project>
+        <Option title="TestProject" />
+        <Option compiler="riscv32-v2" />
+        <Build>
+            <Target title="Debug">
+                <Option output="Output/bin/test.elf" prefix_auto="1" extension_auto="0" />
+                <Option object_output="Output/obj/Debug" />
+            </Target>
+        </Build>
+        <!-- 特殊文件没有显式指定compile属性 -->
+        <Unit filename="src/special.asm">
+            <Option buildCommand="as $file -o $object" use="1" />
+        </Unit>
+    </Project>
+</CodeBlocks_project_file>"#;
+
+    let result = parse_cbp_file(xml_content);
+    assert!(result.is_ok());
+    let project_info = result.unwrap();
+
+    // 验证特殊文件数量
+    assert_eq!(project_info.special_files.len(), 1, "应该有1个特殊文件");
+
+    // 验证特殊文件的compile默认值
+    let special_file = &project_info.special_files[0];
+    assert_eq!(special_file.compile, false, "特殊文件的compile默认值应该为false");
+    assert_eq!(special_file.link, false, "特殊文件的link默认值应该为false");
 }
 
 #[test]
@@ -209,10 +319,16 @@ fn test_parse_unit_compile_0() {
     // 验证项目基本信息
     assert_eq!(project_info.project_name, "TestProject");
 
-    // 验证源文件数量（注意：对于普通源文件，不管compile属性是什么，都会被添加到source_files列表中）
+    // 验证源文件数量：所有普通源文件都会被添加到source_files列表中
     assert_eq!(project_info.source_files.len(), 2, "应该有2个源文件");
-    assert!(project_info.source_files.contains(&"src/main.c".to_string()), "应该包含src/main.c");
-    assert!(project_info.source_files.contains(&"src/helper.c".to_string()), "应该包含src/helper.c");
+    
+    // 验证src/main.c的compile属性为false
+    let main_file = project_info.source_files.iter().find(|f| f.filename == "src/main.c").expect("应该包含src/main.c文件");
+    assert_eq!(main_file.compile, false, "src/main.c的compile属性应该为false");
+    
+    // 验证src/helper.c的compile属性为true
+    let helper_file = project_info.source_files.iter().find(|f| f.filename == "src/helper.c").expect("应该包含src/helper.c文件");
+    assert_eq!(helper_file.compile, true, "src/helper.c的compile属性应该为true");
 }
 
 #[test]
@@ -250,7 +366,7 @@ fn test_parse_special_files() {
 
     // 验证普通源文件被正确处理
     assert_eq!(project_info.source_files.len(), 1, "应该有1个普通源文件");
-    assert!(project_info.source_files.contains(&"src/regular.c".to_string()), "应该包含src/regular.c");
+    assert!(project_info.source_files.iter().any(|f| f.filename == "src/regular.c"), "应该包含src/regular.c");
 
     // 验证特殊文件被正确处理
     assert_eq!(project_info.special_files.len(), 1, "应该有1个特殊文件");
@@ -295,7 +411,7 @@ fn test_parse_special_files_without_build_command() {
 
     // 验证普通源文件被正确处理
     assert_eq!(project_info.source_files.len(), 1, "应该有1个普通源文件");
-    assert!(project_info.source_files.contains(&"src/regular.c".to_string()), "应该包含src/regular.c");
+    assert!(project_info.source_files.iter().any(|f| f.filename == "src/regular.c"), "应该包含src/regular.c");
 
     // 验证没有buildCommand的特殊文件也被正确处理
     assert_eq!(project_info.special_files.len(), 1, "应该有1个特殊文件");
@@ -602,15 +718,15 @@ fn test_parse_different_source_file_types() {
     assert_eq!(project_info.source_files.len(), 6, "应该有6个源文件");
     
     // 验证各种类型的源文件都被正确识别
-    assert!(project_info.source_files.contains(&"src/main.c".to_string()), "应该包含C源文件");
-    assert!(project_info.source_files.contains(&"src/helper.cpp".to_string()), "应该包含C++源文件");
-    assert!(project_info.source_files.contains(&"src/startup.S".to_string()), "应该包含大写S汇编源文件");
-    assert!(project_info.source_files.contains(&"src/util.s".to_string()), "应该包含小写s汇编源文件");
-    assert!(project_info.source_files.contains(&"src/main.C".to_string()), "应该包含大写C C++源文件");
-    assert!(project_info.source_files.contains(&"src/main.CPP".to_string()), "应该包含大写CPP C++源文件");
+    assert!(project_info.source_files.iter().any(|f| f.filename == "src/main.c"), "应该包含C源文件");
+    assert!(project_info.source_files.iter().any(|f| f.filename == "src/helper.cpp"), "应该包含C++源文件");
+    assert!(project_info.source_files.iter().any(|f| f.filename == "src/startup.S"), "应该包含大写S汇编源文件");
+    assert!(project_info.source_files.iter().any(|f| f.filename == "src/util.s"), "应该包含小写s汇编源文件");
+    assert!(project_info.source_files.iter().any(|f| f.filename == "src/main.C"), "应该包含大写C C++源文件");
+    assert!(project_info.source_files.iter().any(|f| f.filename == "src/main.CPP"), "应该包含大写CPP C++源文件");
     
-    // 验证头文件没有被识别为源文件
-    assert!(!project_info.source_files.contains(&"src/header.h".to_string()), "不应该包含头文件");
+    // 验证不包含头文件
+    assert!(!project_info.source_files.iter().any(|f| f.filename == "src/header.h"), "不应该包含头文件");
 }
 
 #[test]

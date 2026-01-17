@@ -1,5 +1,5 @@
 use crate::ToolchainConfig;
-use crate::models::{MarchInfo, SpecialFileBuildInfo};
+use crate::models::{MarchInfo, SpecialFileBuildInfo, SourceFileInfo};
 use roxmltree::Document;
 use std::collections::HashSet;
 use std::path::Path;
@@ -10,7 +10,7 @@ pub struct ProjectInfo {
     pub project_name: String,
     pub global_cflags: Vec<String>,
     pub include_dirs: Vec<String>,
-    pub source_files: Vec<String>,
+    pub source_files: Vec<SourceFileInfo>,
     pub special_files: Vec<SpecialFileBuildInfo>,
     pub prebuild_commands: Vec<String>,
     pub postbuild_commands: Vec<String>,
@@ -351,16 +351,22 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
             // 检查是否是普通源文件
             let is_regular_source = ext.map(|e| valid_exts.contains(e)).unwrap_or(false);
 
-            // 检查是否有编译选项
-            let mut should_compile = false;
+            // 初始化编译和链接标志
+            // 普通源文件：默认编译，默认链接
+            // 特殊文件：需要明确指定compile="1"才编译，默认不链接
+            let mut compile = is_regular_source;
+            let mut link = is_regular_source;
             let mut build_commands = Vec::new();
 
             for option in unit.children().filter(|n| n.tag_name().name() == "Option") {
-                // 检查是否有compile="1"属性
-                if let Some(compile) = option.attribute("compile") {
-                    if compile == "1" {
-                        should_compile = true;
-                    }
+                // 检查compile属性：0关闭，1开启
+                if let Some(compile_attr) = option.attribute("compile") {
+                    compile = compile_attr == "1";
+                }
+
+                // 检查link属性：0关闭，1开启
+                if let Some(link_attr) = option.attribute("link") {
+                    link = link_attr == "1";
                 }
 
                 // 检查是否有buildCommand属性和compiler属性
@@ -379,38 +385,38 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
                 }
             }
 
+            // 处理普通源文件
             if is_regular_source {
-                // 普通源文件，添加到source_files
-                source_files.push(filename.to_string());
-            } else if should_compile {
-                // 特殊文件，只要should_compile为true，不管有没有buildCommand，都要处理
-                if !build_commands.is_empty() {
-                    // 查找匹配当前编译器的构建命令
-                    let matching_build_cmd = build_commands
-                        .iter()
-                        .find(|(compiler, _)| compiler == &compiler_id)
-                        .or_else(|| build_commands.first());
+                // 普通源文件：根据compile和link属性决定是否编译和链接
+                source_files.push(SourceFileInfo {
+                    filename: filename.to_string(),
+                    compile,
+                    link,
+                });
+            } else {
+                // 处理特殊文件
+                // 查找匹配当前编译器的构建命令
+                let matching_build_cmd = build_commands
+                    .iter()
+                    .find(|(compiler, _)| compiler == &compiler_id)
+                    .or_else(|| build_commands.first());
 
-                    if let Some((compiler, build_cmd)) = matching_build_cmd {
-                        special_files.push(SpecialFileBuildInfo {
-                            filename: filename.to_string(),
-                            compiler_id: compiler.clone(),
-                            build_command: build_cmd.clone(),
-                        });
-                    } else {
-                        // 没有匹配的构建命令，使用默认的空命令
-                        special_files.push(SpecialFileBuildInfo {
-                            filename: filename.to_string(),
-                            compiler_id: compiler_id.clone(),
-                            build_command: String::new(),
-                        });
-                    }
+                let (compiler_id, build_command) = if let Some((compiler, build_cmd)) = matching_build_cmd {
+                    (compiler.clone(), build_cmd.clone())
                 } else {
-                    // 没有buildCommand，使用默认的空命令
+                    // 没有匹配的构建命令，使用默认值
+                    (compiler_id.clone(), String::new())
+                };
+
+                // 只处理有意义的特殊文件，忽略头文件等
+                let is_header_file = ext.map(|e| e.to_lowercase() == "h" || e.to_lowercase() == "hpp").unwrap_or(false);
+                if !is_header_file {
                     special_files.push(SpecialFileBuildInfo {
                         filename: filename.to_string(),
-                        compiler_id: compiler_id.clone(),
-                        build_command: String::new(),
+                        compiler_id,
+                        build_command,
+                        compile,
+                        link,
                     });
                 }
             }
@@ -559,8 +565,8 @@ mod tests {
         assert_eq!(project.compiler_id, "riscv32-v2");
 
         // 验证源文件列表
-        assert!(project.source_files.contains(&"main.c".to_string()));
-        assert!(project.source_files.contains(&"utils.c".to_string()));
+        assert!(project.source_files.iter().any(|f| f.filename == "main.c"));
+        assert!(project.source_files.iter().any(|f| f.filename == "utils.c"));
 
         // 验证 include 路径 (注意解析器里添加了 -I 前缀)
         assert!(project.include_dirs.contains(&"-Isrc/include".to_string()));

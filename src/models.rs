@@ -1,5 +1,13 @@
 use serde::Serialize;
 
+/// 普通源文件信息，包含编译和链接标志
+#[derive(Debug, Default, PartialEq)]
+pub struct SourceFileInfo {
+    pub filename: String,    // 文件名
+    pub compile: bool,       // 是否编译
+    pub link: bool,          // 是否链接
+}
+
 /// 编译命令结构，用于生成compile_commands.json
 #[derive(Serialize)]
 pub struct CompileCommand {
@@ -9,12 +17,14 @@ pub struct CompileCommand {
 }
 
 /// 特殊文件构建信息
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq)]
 pub struct SpecialFileBuildInfo {
     pub filename: String, // 文件名
     #[allow(dead_code)]
     pub compiler_id: String, // 编译器ID
     pub build_command: String, // 构建命令模板
+    pub compile: bool,      // 是否编译
+    pub link: bool,         // 是否链接
 }
 
 /// RISC-V架构特性信息

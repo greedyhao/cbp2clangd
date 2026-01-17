@@ -244,7 +244,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 5. 处理 .clangd (在 Workspace Root)
     let clangd_path = workspace_root.join(".clangd");
 
-    // A. 生成公共头部 (Base Config)
+    // A. 生成公共头部 (Base Config) - 只包含 CompileFlags
     let base_config = generate_clangd_config(&project_info, &toolchain, args.no_header_insertion)?;
 
     // B. 生成项目专属片段 (Fragment)
@@ -263,10 +263,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let mut final_parts = Vec::new();
+    let mut base_with_completion = String::new();
 
     if existing_content.trim().is_empty() {
-        // 新文件：Header + Fragment
-        final_parts.push(base_config);
+        // 新文件：处理 Completion 配置 + Fragment
+        base_with_completion.push_str(&base_config);
+        
+        // 如果需要，添加 Completion 配置
+        if args.no_header_insertion {
+            base_with_completion.push_str("\n\nCompletion:\n  HeaderInsertion: Never");
+        }
+        
+        final_parts.push(base_with_completion);
     } else {
         // 旧文件：使用新的合并逻辑，只替换 CompileFlags 部分，保留其他配置
         debug_println!("[DEBUG] Merging .clangd config, preserving non-CompileFlags sections...");
@@ -277,7 +285,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 处理基本配置部分（第一部分）
         let base_part = parts[0];
         let merged_base_config = cbp2clangd::merge_clangd_config(base_part, &base_config);
-        final_parts.push(merged_base_config);
+        
+        // 检查现有内容是否已经包含 Completion 配置
+        let has_completion = existing_content.contains("Completion:");
+        
+        // 构建带有 Completion 配置的基本配置
+        base_with_completion.push_str(&merged_base_config);
+        
+        // 如果需要添加 Completion 配置且现有内容中没有，则添加
+        if args.no_header_insertion && !has_completion {
+            // 确保在适当的位置添加（在 CompileFlags 之后）
+            if !merged_base_config.ends_with('\n') {
+                base_with_completion.push_str("\n");
+            }
+            base_with_completion.push_str("\nCompletion:\n  HeaderInsertion: Never");
+        }
+        
+        final_parts.push(base_with_completion);
 
         // 处理片段部分（其余部分）
         for part in parts.iter().skip(1) {

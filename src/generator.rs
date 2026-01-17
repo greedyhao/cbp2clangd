@@ -59,7 +59,7 @@ fn find_common_ancestor(paths: &[PathBuf]) -> PathBuf {
 pub fn generate_clangd_config(
     project_info: &ProjectInfo,
     toolchain: &ToolchainConfig,
-    no_header_insertion: bool,
+    _no_header_insertion: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     debug_println!("[DEBUG generator] Starting to generate .clangd config...");
 
@@ -151,11 +151,6 @@ pub fn generate_clangd_config(
         }
     }
 
-    // 如果设置了no_header_insertion，则添加Completion配置
-    if no_header_insertion {
-        content.push_str("\nCompletion:\n  HeaderInsertion: Never\n");
-    }
-
     debug_println!("[DEBUG generator] Successfully generated .clangd config content");
     Ok(content)
 }
@@ -171,7 +166,7 @@ pub fn generate_clangd_fragment(
 
     // 1. 计算 PathMatch (基于源文件共同祖先)
     let abs_source_paths: Vec<PathBuf> = project_info.source_files.iter()
-        .map(|src| get_clean_absolute_path(project_dir, Path::new(src)))
+        .map(|src| get_clean_absolute_path(project_dir, Path::new(&src.filename)))
         .collect();
     
     let common_ancestor = find_common_ancestor(&abs_source_paths);
@@ -305,20 +300,31 @@ pub fn generate_compile_commands(
         "[DEBUG generator] Starting to process {} source files...",
         project_info.source_files.len()
     );
-    let mut compile_commands = Vec::with_capacity(project_info.source_files.len());
+    let mut compile_commands = Vec::new();
     for (index, src) in project_info.source_files.iter().enumerate() {
+        // 只有compile为true的文件才生成编译命令
+        if !src.compile {
+            debug_println!(
+                "[DEBUG generator] Skipping file {}/{}: {} (compile is false)",
+                index + 1,
+                project_info.source_files.len(),
+                src.filename
+            );
+            continue;
+        }
+
         debug_println!(
             "[DEBUG generator] Processing file {}/{}: {}",
             index + 1,
             project_info.source_files.len(),
-            src
+            src.filename
         );
 
         // === 修改关键点：避免使用 canonicalize ===
         // 之前使用: abs_path_buf.canonicalize() 会导致 Z: 变 \\server\share
         // 现在使用: get_clean_absolute_path 仅做逻辑拼接
         debug_println!("[DEBUG generator] Calculating absolute path for source file (logically)...");
-        let abs_path_buf = get_clean_absolute_path(project_dir, Path::new(src));
+        let abs_path_buf = get_clean_absolute_path(project_dir, Path::new(&src.filename));
 
         // 转换为字符串并标准化分隔符
         let abs_path_str = normalize_path(&abs_path_buf);
@@ -337,7 +343,7 @@ pub fn generate_compile_commands(
             Err(e) => {
                 println!(
                     "[WARNING generator] Failed to get short path for source file {}: {}. Using absolute path.",
-                    src, e
+                    src.filename, e
                 );
                 abs_path_str.clone()
             }
@@ -569,7 +575,7 @@ pub fn generate_ninja_build(
     // === 新增逻辑：计算所有源文件的共同祖先目录，以保持目录结构 ===
     // 1. 获取所有源文件的逻辑绝对路径
     let abs_source_paths: Vec<PathBuf> = project_info.source_files.iter()
-        .map(|src| get_clean_absolute_path(project_dir, Path::new(src)))
+        .map(|src| get_clean_absolute_path(project_dir, Path::new(&src.filename)))
         .collect();
 
     // 2. 找到共同祖先目录
@@ -582,13 +588,13 @@ pub fn generate_ninja_build(
     let mut src_to_obj_map = Vec::new();
 
     // 处理普通源文件
-    // 同时遍历 原始相对路径 和 计算出的绝对路径
-    for (src, abs_path) in project_info.source_files.iter().zip(abs_source_paths.iter()) {
-        let src_path = Path::new(src);
+    // 同时遍历 SourceFileInfo 和 计算出的绝对路径
+    for (src_info, abs_path) in project_info.source_files.iter().zip(abs_source_paths.iter()) {
+        let src_path = Path::new(&src_info.filename);
 
         // 3. 计算相对于共同祖先的路径
         // 如果 strip_prefix 失败（例如跨盘符），回退到使用文件名
-        let relative_structure = abs_path.strip_prefix(&common_ancestor)
+        let relative_structure: &Path = abs_path.strip_prefix(&common_ancestor)
             .unwrap_or_else(|_| match src_path.file_name() {
                 Some(name) => Path::new(name),
                 None => src_path,
@@ -606,61 +612,76 @@ pub fn generate_ninja_build(
         let escaped_obj_name = escape_ninja_path(&obj_name);
         let escaped_src = escape_ninja_path(&clean_src);
         
-        regular_obj_files.push(escaped_obj_name.clone());
-        src_to_obj_map.push((escaped_src, escaped_obj_name));
+        // 如果需要链接，将对象文件添加到链接列表中
+        if src_info.link {
+            regular_obj_files.push(escaped_obj_name.clone());
+        }
+        
+        // 如果需要编译，添加到编译规则映射中
+        if src_info.compile {
+            src_to_obj_map.push((escaped_src, escaped_obj_name));
+        }
     }
     // === 结束新增逻辑 ===
 
-    // 处理特殊文件（只编译，不链接）
-        let mut special_output_files = Vec::new();
-        for special_file in &project_info.special_files {
-            // 解析构建命令中的目标文件名
-            let mut processed_cmd = special_file.build_command.clone();
+    // 处理特殊文件
+    let mut special_output_files = Vec::new();
+    for special_file in &project_info.special_files {
+        // 只有compile为true的特殊文件才处理
+        if !special_file.compile {
+            debug_println!("[DEBUG generator] Skipping special file {} (compile is false)", special_file.filename);
+            continue;
+        }
 
-            // 路径标准化处理
-            let clean_file_path = normalize_path(Path::new(&special_file.filename));
-            let clean_includes = project_info.include_dirs.iter()
-                .map(|p| normalize_path(Path::new(p)))
-                .collect::<Vec<_>>()
-                .join(" ");
+        // 解析构建命令中的目标文件名
+        let mut processed_cmd = special_file.build_command.clone();
 
-            // 替换变量
-            processed_cmd = processed_cmd.replace("$compiler", &compiler);
-            processed_cmd = processed_cmd.replace("$options", &base_flags.join(" "));
-            processed_cmd = processed_cmd.replace("$includes", &clean_includes);
-            processed_cmd = processed_cmd.replace("$file", &clean_file_path);
-            // [FIX] 区分 OBJECT_DIR 和 OUTPUT_DIR
-            processed_cmd = processed_cmd.replace("$(TARGET_OBJECT_DIR)", &clean_obj_dir);
-            processed_cmd = processed_cmd.replace("$(TARGET_OUTPUT_DIR)", &clean_target_output_dir);
+        // 路径标准化处理
+        let clean_file_path = normalize_path(Path::new(&special_file.filename));
+        let clean_includes = project_info.include_dirs.iter()
+            .map(|p| normalize_path(Path::new(p)))
+            .collect::<Vec<_>>()
+            .join(" ");
 
-            // 提取输出文件名
-            let output_file = if let Some(output_pos) = processed_cmd.find("-o ") {
-                let rest = &processed_cmd[output_pos + 3..];
-                let raw_out = if let Some(space_pos) = rest.find(' ') {
-                    &rest[..space_pos]
-                } else {
-                    rest
-                };
-                normalize_path(Path::new(raw_out))
+        // 替换变量
+        processed_cmd = processed_cmd.replace("$compiler", &compiler);
+        processed_cmd = processed_cmd.replace("$options", &base_flags.join(" "));
+        processed_cmd = processed_cmd.replace("$includes", &clean_includes);
+        processed_cmd = processed_cmd.replace("$file", &clean_file_path);
+        // [FIX] 区分 OBJECT_DIR 和 OUTPUT_DIR
+        processed_cmd = processed_cmd.replace("$(TARGET_OBJECT_DIR)", &clean_obj_dir);
+        processed_cmd = processed_cmd.replace("$(TARGET_OUTPUT_DIR)", &clean_target_output_dir);
+
+        // 提取输出文件名
+        let output_file = if let Some(output_pos) = processed_cmd.find("-o ") {
+            let rest = &processed_cmd[output_pos + 3..];
+            let raw_out = if let Some(space_pos) = rest.find(' ') {
+                &rest[..space_pos]
             } else {
-                // 对特殊文件也应用类似的逻辑，尝试保持结构，但因为它是自定义命令，
-                // 通常由用户指定输出位置。这里只做简单的 fallback
-                let abs_path = get_clean_absolute_path(project_dir, Path::new(&special_file.filename));
-                let relative_structure = abs_path.strip_prefix(&common_ancestor)
-                    .unwrap_or_else(|_| Path::new(&special_file.filename));
-                
-                let full_path = Path::new(&project_info.object_output)
-                    .join(relative_structure)
-                    .with_extension("o");
-                    
-                normalize_path(&full_path)
+                rest
             };
-
-            // 对 Ninja 构建文件中的路径进行转义，处理空格和冒号
-            let escaped_output_file = escape_ninja_path(&output_file);
-            let escaped_clean_file_path = escape_ninja_path(&clean_file_path);
+            normalize_path(Path::new(raw_out))
+        } else {
+            // 对特殊文件也应用类似的逻辑，尝试保持结构，但因为它是自定义命令，
+            // 通常由用户指定输出位置。这里只做简单的 fallback
+            let abs_path = get_clean_absolute_path(project_dir, Path::new(&special_file.filename));
+            let relative_structure: &Path = abs_path.strip_prefix(&common_ancestor)
+                .unwrap_or_else(|_| Path::new(&special_file.filename));
             
-            special_output_files.push(escaped_output_file.clone());
+            let full_path = Path::new(&project_info.object_output)
+                .join(relative_structure)
+                .with_extension("o");
+                    
+            normalize_path(&full_path)
+        };
+
+        // 对 Ninja 构建文件中的路径进行转义，处理空格和冒号
+        let escaped_output_file = escape_ninja_path(&output_file);
+        let escaped_clean_file_path = escape_ninja_path(&clean_file_path);
+            
+        // 所有compile为true的特殊文件都需要被添加到链接规则中
+        // 特殊文件的输出文件必须作为依赖，否则编译命令不会执行
+        special_output_files.push(escaped_output_file.clone());
 
             let rule_name = format!(
                 "special_{}",
@@ -772,6 +793,7 @@ pub fn generate_ninja_build(
         ));
         ninja_content.push_str("\n");
 
+        // 特殊文件的输出作为隐式依赖，放到 | 符号后面
         let deps_str = if special_output_files.is_empty() {
              String::new()
         } else {
@@ -837,6 +859,7 @@ pub fn generate_ninja_build(
         ));
         ninja_content.push_str("\n");
 
+        // 特殊文件的输出和库依赖都作为隐式依赖，放到 | 符号后面
         let mut implicit_deps = Vec::new();
         implicit_deps.extend(special_output_files.iter().cloned());
         implicit_deps.extend(resolved_lib_dependencies.iter().cloned());
@@ -940,7 +963,10 @@ pub fn merge_clangd_config(existing_content: &str, new_compile_flags: &str) -> S
            (!line.starts_with("  ")) { // 顶级部分（没有缩进）
             if !found_global_compile_flags {
                 // 第一次遇到全局 CompileFlags，用新的替换
-                result_lines.push(new_compile_flags);
+                // 将 new_compile_flags 按行分割，避免多余的换行符
+                for line in new_compile_flags.lines() {
+                    result_lines.push(line);
+                }
                 found_global_compile_flags = true;
 
                 // 跳过原有的 CompileFlags 部分内容
@@ -1045,16 +1071,21 @@ pub fn merge_clangd_config(existing_content: &str, new_compile_flags: &str) -> S
 
     // 如果没有找到全局 CompileFlags 部分，则在开头添加新的
     if !found_global_compile_flags {
-        if !result_lines.is_empty() {
-            let mut new_content = new_compile_flags.to_string();
+        let mut new_content = String::new();
+        // 将 new_compile_flags 按行分割，避免多余的换行符
+        for line in new_compile_flags.lines() {
+            new_content.push_str(line);
             new_content.push('\n');
+        }
+        
+        if !result_lines.is_empty() {
             for line in result_lines {
                 new_content.push_str(line);
                 new_content.push('\n');
             }
             return new_content.trim_end().to_string();
         } else {
-            return new_compile_flags.to_string();
+            return new_content.trim_end().to_string();
         }
     }
 
@@ -1329,6 +1360,8 @@ mod tests {
                     compiler_id: "gcc".to_string(),
                     // 测试目标：验证 TARGET_OUTPUT_DIR 和 TARGET_OBJECT_DIR 是否被正确替换
                     build_command: "cp $file $(TARGET_OUTPUT_DIR)\\ && echo $(TARGET_OBJECT_DIR)".to_string(),
+                    compile: true,
+                    link: false,
                 }
             ],
             prebuild_commands: vec![],
@@ -1392,6 +1425,45 @@ mod tests {
         // 检查 Completion 配置是否保留
         assert!(result.contains("Completion:"));
         assert!(result.contains("detailedLabels: true"));
+    }
+
+    #[test]
+    fn test_merge_clangd_config_no_extra_newlines() {
+        // 测试场景：合并配置时不会产生多余的换行符
+        let existing_content = "CompileFlags:\n  Add:\n    - -Iexisting/path\n\nCompletion:\n  detailedLabels: false";
+        let new_compile_flags = "CompileFlags:\n  Add:\n    - -Inew/path\n    - -DNEW_FLAG\n    - -DMY_DEFINE";
+
+        let result = merge_clangd_config(existing_content, new_compile_flags);
+
+        // 检查新的 CompileFlags 是否被添加
+        assert!(result.contains("-Inew/path"));
+        assert!(result.contains("-DNEW_FLAG"));
+        assert!(result.contains("-DMY_DEFINE"));
+
+        // 检查原有的 Completion 配置是否保留
+        assert!(result.contains("Completion:"));
+        assert!(result.contains("detailedLabels: false"));
+
+        // 检查没有多余的换行符
+        // 计算 CompileFlags 部分结束后到 Completion 部分开始前的换行符数量
+        let mut newline_count = 0;
+        
+        for line in result.lines() {
+            if line.trim() == "" {
+                newline_count += 1;
+            } else if line.trim().starts_with("Completion:") {
+                break;
+            } else if line.trim() != "" {
+                // 重置换行符计数，因为这是 CompileFlags 部分的有效内容
+                newline_count = 0;
+            }
+        }
+        
+        // 确保只有一个空行分隔 CompileFlags 和 Completion
+        assert_eq!(newline_count, 1, "Expected only one empty line between CompileFlags and Completion sections");
+        
+        // 确保文件中没有连续的多个空行
+        assert!(!result.contains("\n\n\n"), "Expected no more than two consecutive newlines in the result");
     }
 
     #[test]

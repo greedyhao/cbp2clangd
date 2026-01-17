@@ -200,3 +200,55 @@ fn test_target_output_dir_path_separator() {
         "TARGET_OBJECT_DIR 应该被正确替换，路径应该包含分隔符"
     );
 }
+
+#[test]
+fn test_special_files_as_implicit_deps() {
+    // 创建一个包含特殊文件的XML内容，测试特殊文件作为隐式依赖
+    let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<CodeBlocks_project_file>
+    <FileVersion major="1" minor="6" />
+    <Project>
+        <Option title="TestProject" />
+        <Option compiler="riscv32-v2" />
+        <Build>
+            <Target title="Debug">
+                <Option output="Output/bin/test.elf" prefix_auto="1" extension_auto="0" />
+                <Option object_output="Output/obj/Debug" />
+            </Target>
+        </Build>
+        <Unit filename="src/main.c">
+            <Option compile="1" link="1" />
+        </Unit>
+        <!-- 特殊文件，compile为true，link为false -->
+        <Unit filename="src/special.asm">
+            <Option compile="1" link="0" />
+            <Option compiler="riscv32-v2" buildCommand="as $file -o $object" use="1" />
+        </Unit>
+    </Project>
+</CodeBlocks_project_file>"#;
+
+    let project_info = parse_cbp_file(xml_content).unwrap();
+    let toolchain = ToolchainConfig::from_compiler_id("riscv32-v2").unwrap();
+
+    let result = generate_ninja_build(&project_info, Path::new("."), &toolchain);
+    assert!(result.is_ok());
+    let ninja_content = result.unwrap();
+
+    // 打印生成的ninja内容，以便调试
+    println!("Generated ninja content for special files test:\n{}", ninja_content);
+
+    // 检查特殊文件的编译规则是否生成
+    assert!(ninja_content.contains("rule special_src_special_asm"), "应该生成特殊文件的编译规则");
+    assert!(ninja_content.contains("as src\\special.asm -o"), "应该生成特殊文件的编译命令");
+
+    // 检查链接规则是否包含特殊文件作为隐式依赖
+    assert!(ninja_content.contains("|"), "链接规则应该包含隐式依赖分隔符");
+
+    // 检查普通源文件的编译规则
+    assert!(ninja_content.contains("rule cc"), "应该生成普通源文件的编译规则");
+    assert!(ninja_content.contains("build Output\\obj\\Debug\\main.o: cc src\\main.c"), "应该生成普通源文件的编译命令");
+
+    // 检查最终链接规则
+    assert!(ninja_content.contains("build Output\\bin\\test.elf: link"), "应该生成链接规则");
+    assert!(ninja_content.contains("Output\\obj\\Debug\\main.o"), "链接规则应该包含普通源文件的目标文件");
+}
