@@ -14,7 +14,7 @@ path = "src/main.rs"
 [dependencies]
 roxmltree = "0.21.1"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0.145"
+serde_json = "1.0.149"
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [profile.release]

@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 
 /// 普通源文件信息，包含编译和链接标志
 #[derive(Debug, Default, PartialEq)]
@@ -9,7 +9,7 @@ pub struct SourceFileInfo {
 }
 
 /// 编译命令结构，用于生成compile_commands.json
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct CompileCommand {
     pub directory: String,
     pub command: String,

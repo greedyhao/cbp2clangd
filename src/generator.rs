@@ -4,6 +4,7 @@ use crate::models::CompileCommand;
 use crate::parser::ProjectInfo;
 use crate::utils::{escape_ninja_path, get_clean_absolute_path, get_short_path, quote_if_needed};
 use std::path::{Component, Path, PathBuf};
+use std::fs;
 
 /// 辅助函数：将Path转换为Windows风格的字符串路径（使用反斜杠作为分隔符）
 fn normalize_path(path: &Path) -> String {
@@ -1164,6 +1165,163 @@ pub fn generate_build_script(
 
     debug_println!("[DEBUG generator] Successfully generated build script content");
     script_content
+}
+
+/// 合并多个 compile_commands.json 文件到第一个文件中
+/// 
+/// # 参数
+/// * `json_paths` - JSON 文件路径列表，第一个文件将作为合并目标
+/// * `workspace_root` - workspace 根目录，用于生成 .clangd 文件
+/// 
+/// # 返回
+/// * `Ok(())` - 合并成功
+/// * `Err(Box<dyn Error>)` - 发生错误
+pub fn merge_compile_commands(
+    json_paths: &[PathBuf],
+    workspace_root: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    debug_println!("[DEBUG generator] Starting to merge compile_commands.json files...");
+    
+    if json_paths.is_empty() {
+        return Err("At least one JSON file is required".into());
+    }
+    
+    // 1. 读取第一个 JSON 文件作为基础
+    let first_json_path = &json_paths[0];
+    debug_println!("[DEBUG generator] Reading base JSON: {}", first_json_path.display());
+    
+    if !first_json_path.exists() {
+        return Err(format!("Base JSON file not found: {}", first_json_path.display()).into());
+    }
+    
+    let mut merged_commands: Vec<CompileCommand> = {
+        let content = fs::read_to_string(first_json_path)?;
+        serde_json::from_str(&content)?
+    };
+    
+    debug_println!(
+        "[DEBUG generator] Base JSON contains {} commands",
+        merged_commands.len()
+    );
+    
+    // 2. 读取并合并后续所有 JSON 文件
+    for json_path in json_paths.iter().skip(1) {
+        debug_println!("[DEBUG generator] Merging JSON: {}", json_path.display());
+        
+        if !json_path.exists() {
+            eprintln!("Warning: JSON file not found, skipping: {}", json_path.display());
+            continue;
+        }
+        
+        let content = fs::read_to_string(json_path)?;
+        let mut commands: Vec<CompileCommand> = serde_json::from_str(&content)?;
+        
+        debug_println!(
+            "[DEBUG generator] This JSON contains {} commands",
+            commands.len()
+        );
+        
+        merged_commands.append(&mut commands);
+    }
+    
+    // 3. 写回第一个 JSON 文件
+    debug_println!(
+        "[DEBUG generator] Writing merged commands ({} total) to: {}",
+        merged_commands.len(),
+        first_json_path.display()
+    );
+    
+    let json_content = serde_json::to_string_pretty(&merged_commands)?;
+    fs::write(first_json_path, json_content)?;
+    
+    // 4. 更新 .clangd 配置文件
+    // 目标格式：将 CompilationDatabase 添加到现有 CompileFlags 块内部
+    let clangd_path = workspace_root.join(".clangd");
+    let first_json_dir = first_json_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
+    let db_path_str = first_json_dir.to_string_lossy().replace("\\", "/");
+
+    debug_println!(
+        "[DEBUG generator] Updating .clangd at: {}",
+        clangd_path.display()
+    );
+
+    // 读取现有的 .clangd 内容（如果存在）
+    let existing_clangd = if clangd_path.exists() {
+        fs::read_to_string(&clangd_path)?
+    } else {
+        String::new()
+    };
+
+    // 合并配置：移除所有 If 片段，将 CompilationDatabase 添加到 CompileFlags 内部
+    let final_content = if existing_clangd.trim().is_empty() {
+        // 新文件：创建完整的配置
+        format!(
+            "CompileFlags:\n  CompilationDatabase: {}\n",
+            db_path_str
+        )
+    } else {
+        // 步骤1：按 --- 分割，只保留 --- 之前的部分（主配置）
+        let parts: Vec<&str> = existing_clangd.split("\n---").collect();
+        let base_content = parts.first().unwrap_or(&"").trim().to_string();
+
+        // 步骤2：在 CompileFlags 中添加 CompilationDatabase
+        if base_content.is_empty() {
+            // 空内容，创建新的
+            format!(
+                "CompileFlags:\n  CompilationDatabase: {}\n",
+                db_path_str
+            )
+        } else {
+            // 已有内容：在 CompileFlags 块中添加 CompilationDatabase
+            let lines: Vec<&str> = base_content.lines().collect();
+            let mut new_lines: Vec<String> = Vec::new();
+            let mut added = false;
+
+            for line in lines {
+                let trimmed = line.trim();
+
+                if trimmed == "CompileFlags:" {
+                    // 添加 CompileFlags 行
+                    new_lines.push(line.to_string());
+                    // 下一行添加 CompilationDatabase
+                    new_lines.push(format!("  CompilationDatabase: {}", db_path_str));
+                    added = true;
+                } else if !added || trimmed != "CompilationDatabase:" {
+                    // 跳过已有的 CompilationDatabase 行（避免重复）
+                    new_lines.push(line.to_string());
+                }
+            }
+            debug_println!("[DEBUG generator] Successfully updated .clangd with CompilationDatabase: {:?}", new_lines);
+
+            // 如果没有找到 CompileFlags（异常情况），在开头添加
+            if !added {
+                format!(
+                    "CompileFlags:\n  CompilationDatabase: {}\n\n{}",
+                    db_path_str,
+                    base_content
+                )
+            } else {
+                new_lines.join("\n")
+            }
+        }
+    };
+
+    fs::write(&clangd_path, final_content)?;
+    println!(
+        "Updated {} with CompilationDatabase: {}",
+        clangd_path.display(),
+        db_path_str
+    );
+    
+    debug_println!(
+        "[DEBUG generator] Successfully merged {} compile_commands.json files",
+        json_paths.len()
+    );
+    
+    Ok(())
 }
 
 #[cfg(test)]

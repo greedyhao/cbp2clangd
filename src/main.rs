@@ -2,8 +2,8 @@ use std::env;
 use std::fs;
 
 use cbp2clangd::{
-    ToolchainConfig, compute_absolute_path, debug_println, generate_build_script, generate_compile_commands,
-    generate_ninja_build, parse_args, parse_cbp_file, set_debug_mode,
+    Command, ToolchainConfig, compute_absolute_path, debug_println, generate_build_script, generate_compile_commands,
+    generate_ninja_build, merge_compile_commands, parse_args, parse_cbp_file, set_debug_mode,
     // 引入两个生成函数
     generate_clangd_config, generate_clangd_fragment,
 };
@@ -13,8 +13,36 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 解析命令行参数
     debug_println!("[DEBUG] Parsing command line arguments...");
-    let args = parse_args()?;
+    let command = parse_args()?;
 
+    match command {
+        Command::ShowVersion => {
+            println!("cbp2clangd v{}", VERSION);
+            Ok(())
+        }
+        Command::Convert(args) => {
+            run_convert(args)
+        }
+        Command::MergeCompileCommands(args) => {
+            // 设置调试模式
+            set_debug_mode(args.debug);
+            debug_println!("[DEBUG] Starting merge-compile-commands");
+            
+            // 确保 output_dir 是绝对路径
+            let workspace_root = compute_absolute_path(&args.output_dir)?;
+            if !workspace_root.exists() {
+                fs::create_dir_all(&workspace_root)?;
+            }
+            
+            // 执行合并
+            merge_compile_commands(&args.json_paths, &workspace_root)?;
+            
+            Ok(())
+        }
+    }
+}
+
+fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::Error>> {
     // 设置调试模式
     set_debug_mode(args.debug);
 
@@ -25,16 +53,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // 如果请求显示版本信息，则打印版本并退出
-    if args.show_version {
-        println!("cbp2clangd v{}", VERSION);
-        return Ok(());
+    if args.test_mode {
+        // 测试模式已经在 CLI 处理
     }
 
     // 读取并解析项目文件
     debug_println!("[DEBUG] Reading project file...");
-    let cbp_path = args.cbp_path.as_ref().unwrap();
+    let cbp_path = &args.cbp_path;
     // output_dir 在 cli.rs 中已经处理过，这里直接获取
-    let cli_output_dir = args.output_dir.as_ref().unwrap();
+    let cli_output_dir = &args.output_dir;
 
     debug_println!("[DEBUG] CBP path: {}", cbp_path.display());
     debug_println!("[DEBUG] Output dir: {}", cli_output_dir.display());
@@ -53,7 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 读取 CBP
     let xml_content = if args.test_mode {
-        // 内置的测试XML内容，包含动态库输出和Build/Target/Linker/Add directory
+        // 内置的测试 XML 内容，包含动态库输出和 Build/Target/Linker/Add directory
         String::from(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <CodeBlocks_project_file>
@@ -97,7 +124,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     debug_println!("[DEBUG] Parsing CBP file...");
     let mut project_info = parse_cbp_file(&xml_content)?;
 
-    // 使用命令行参数中的linker_type覆盖解析结果
+    // 使用命令行参数中的 linker_type 覆盖解析结果
     project_info.linker_type = args.linker_type;
 
     // 确定工具链配置
@@ -119,11 +146,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !toolchain.is_compiler_available() {
         eprintln!("Error: Compiler not found at {}", toolchain.compiler_path());
         eprintln!(
-            "Suggestion: The compiler path may be incorrect or the toolchain is not installed."
+            "Suggestion: The toolchain may not be installed or path is incorrect."
         );
-        eprintln!("You can try:");
-        eprintln!("  1. Install the RV32-Toolchain in the default location");
-        eprintln!("  2. Use a custom toolchain path (to be implemented in future versions)");
 
         // 为了让程序能够继续运行，即使编译器不可用，我们仍然生成配置文件
         // 但会使用一个合理的默认编译器名称而不是路径
@@ -137,7 +161,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 测试模式：直接使用当前目录
         std::env::current_dir()?
     } else {
-        // 正常模式：获取cbp_path的父目录
+        // 正常模式：获取 cbp_path 的父目录
         // 修改：使用 compute_absolute_path 替代 canonicalize
         let parent = cbp_path
             .parent()
@@ -178,7 +202,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&normalized_output_dir)?;
     debug_println!("[DEBUG] Output directory ensured");
 
-    // 使用规范化后的目录创建compile_commands.json路径
+    // 使用规范化后的目录创建 compile_commands.json 路径
     let compile_commands_path = normalized_output_dir.join("compile_commands.json");
     debug_println!(
         "[DEBUG] Final compile_commands.json path: {}",
@@ -306,7 +330,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 处理片段部分（其余部分）
         for part in parts.iter().skip(1) {
             let trimmed_part = part.trim();
-            // 如果片段的 PathMatch 与当前生成的不同，则保留；如果相同，则丢弃(稍后追加新的)
+            // 如果片段的 PathMatch 与当前生成的不同，则保留；如果相同，则丢弃 (稍后追加新的)
             if !trimmed_part.contains(&format!("PathMatch: {}", current_path_match)) {
                 final_parts.push(trimmed_part.to_string());
             } else {
