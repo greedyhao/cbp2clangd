@@ -34,7 +34,12 @@ fn test_parse_cbp_file() {
     assert!(result.is_ok());
     let project_info = result.unwrap();
     assert_eq!(project_info.project_name, "libchatbot");
-    assert_eq!(project_info.output, "Output/bin/chatbot.a");
+
+    // output现在存储在target中
+    assert_eq!(project_info.targets.len(), 1, "应该有1个target");
+    assert_eq!(project_info.targets[0].name, "Debug");
+    assert_eq!(project_info.targets[0].output, "Output/bin/chatbot.a");
+
     assert_eq!(project_info.source_files.len(), 1);
     assert_eq!(project_info.source_files[0].filename, "src/chatbot.c");
     assert_eq!(project_info.source_files[0].compile, true);
@@ -180,25 +185,31 @@ fn test_parse_target_compiler_macros() {
     assert_eq!(project_info.project_name, "TestProject");
     assert_eq!(project_info.compiler_id, "riscv32-v2");
 
-    // 验证宏定义是否被正确提取
+    // 验证宏定义是否被正确提取 (现在在target中)
+    assert_eq!(project_info.targets.len(), 1, "应该有1个target");
+    let target = &project_info.targets[0];
     assert!(
-        project_info
-            .global_cflags
-            .contains(&"-DLE_BIS_EN=1".to_string()),
+        target.cflags.contains(&"-DLE_BIS_EN=1".to_string()),
         "应该包含宏定义 -DLE_BIS_EN=1"
     );
     assert!(
-        project_info
-            .global_cflags
-            .contains(&"-DLE_CIS_EN=1".to_string()),
+        target.cflags.contains(&"-DLE_CIS_EN=1".to_string()),
         "应该包含宏定义 -DLE_CIS_EN=1"
     );
+    assert!(
+        target.defines.contains(&"-DLE_BIS_EN=1".to_string()),
+        "defines应该包含 -DLE_BIS_EN=1"
+    );
+    assert!(
+        target.defines.contains(&"-DLE_CIS_EN=1".to_string()),
+        "defines应该包含 -DLE_CIS_EN=1"
+    );
 
-    // 验证全局编译选项数量
+    // 验证target编译选项数量
     assert_eq!(
-        project_info.global_cflags.len(),
+        target.cflags.len(),
         2,
-        "全局编译选项数量应该为2"
+        "target编译选项数量应该为2"
     );
 }
 
@@ -230,8 +241,11 @@ fn test_parse_target_linker_add_directory() {
     assert_eq!(project_info.project_name, "Test");
 
     // 验证是否正确解析了Build/Target/Linker/Add directory
+    // linker_lib_dirs现在存储在target中
+    assert_eq!(project_info.targets.len(), 1, "应该有1个target");
+    let target = &project_info.targets[0];
     assert!(
-        project_info
+        target
             .linker_lib_dirs
             .contains(&"-L../../platform/libs/net".to_string()),
         "应该包含链接库目录 -L../../platform/libs/net"
@@ -239,7 +253,7 @@ fn test_parse_target_linker_add_directory() {
 
     // 验证链接库是否正确解析
     assert!(
-        project_info.linker_libs.contains(&"-lnet".to_string()),
+        target.linker_libs.contains(&"-lnet".to_string()),
         "应该包含链接库 -lnet"
     );
 }
@@ -449,9 +463,9 @@ fn test_parse_march_info() {
     let project_info = result.unwrap();
 
     // 验证march_info被正确处理
-    assert_eq!(project_info.march_info.full_march, "-march=rv32imacxcustom");
-    assert_eq!(project_info.march_info.base_march, Some("-march=rv32imac".to_string()));
-    assert!(project_info.march_info.has_custom_extension, "应该有自定义扩展");
+    assert_eq!(project_info.targets[0].march_info.full_march, "-march=rv32imacxcustom");
+    assert_eq!(project_info.targets[0].march_info.base_march, Some("-march=rv32imac".to_string()));
+    assert!(project_info.targets[0].march_info.has_custom_extension, "应该有自定义扩展");
 
     // 测试没有自定义扩展的情况
     let xml_content_no_ext = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -479,9 +493,9 @@ fn test_parse_march_info() {
     let project_info_no_ext = result_no_ext.unwrap();
 
     // 验证没有自定义扩展的march_info
-    assert_eq!(project_info_no_ext.march_info.full_march, "-march=rv32imac");
-    assert_eq!(project_info_no_ext.march_info.base_march, None);
-    assert!(!project_info_no_ext.march_info.has_custom_extension, "不应该有自定义扩展");
+    assert_eq!(project_info_no_ext.targets[0].march_info.full_march, "-march=rv32imac");
+    assert_eq!(project_info_no_ext.targets[0].march_info.base_march, None);
+    assert!(!project_info_no_ext.targets[0].march_info.has_custom_extension, "不应该有自定义扩展");
 }
 
 #[test]
@@ -516,10 +530,16 @@ fn test_parse_include_dirs() {
     let project_info = result.unwrap();
 
     // 验证include_dirs被正确处理
-    assert_eq!(project_info.include_dirs.len(), 3, "应该有3个包含目录");
-    assert!(project_info.include_dirs.contains(&"-Isrc/include".to_string()), "应该包含-Isrc/include");
-    assert!(project_info.include_dirs.contains(&"-I../lib/include".to_string()), "应该包含-I../lib/include");
-    assert!(project_info.include_dirs.contains(&"-Icommon/include".to_string()), "应该包含-Icommon/include");
+    // Project级别的include_dirs
+    assert_eq!(project_info.global_include_dirs.len(), 1, "应该有1个全局包含目录");
+    assert!(project_info.global_include_dirs.contains(&"-Icommon/include".to_string()), "应该包含-Icommon/include");
+
+    // Target级别的include_dirs
+    assert_eq!(project_info.targets.len(), 1, "应该有1个target");
+    let target = &project_info.targets[0];
+    assert_eq!(target.include_dirs.len(), 2, "target应该有2个包含目录");
+    assert!(target.include_dirs.contains(&"-Isrc/include".to_string()), "应该包含-Isrc/include");
+    assert!(target.include_dirs.contains(&"-I../lib/include".to_string()), "应该包含-I../lib/include");
 }
 
 #[test]
@@ -551,11 +571,11 @@ fn test_parse_linker_options() {
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
-    // 验证linker_options被正确处理
-    assert_eq!(project_info.linker_options.len(), 3, "应该有3个链接器选项");
-    assert!(project_info.linker_options.contains(&"-Wl,--gc-sections".to_string()), "应该包含-Wl,--gc-sections");
-    assert!(project_info.linker_options.contains(&"-Wl,-Map=output.map".to_string()), "应该包含-Wl,-Map=output.map");
-    assert!(project_info.linker_options.contains(&"--defsym=__stack_size=0x1000".to_string()), "应该包含--defsym=__stack_size=0x1000");
+    // 验证linker_options被正确处理 (Project/Linker级别)
+    assert_eq!(project_info.global_linker_options.len(), 3, "应该有3个链接器选项");
+    assert!(project_info.global_linker_options.contains(&"-Wl,--gc-sections".to_string()), "应该包含-Wl,--gc-sections");
+    assert!(project_info.global_linker_options.contains(&"-Wl,-Map=output.map".to_string()), "应该包含-Wl,-Map=output.map");
+    assert!(project_info.global_linker_options.contains(&"--defsym=__stack_size=0x1000".to_string()), "应该包含--defsym=__stack_size=0x1000");
 }
 
 #[test]
@@ -600,24 +620,32 @@ fn test_parse_multiple_build_targets() {
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
-    // 验证只有第一个Build/Target节点的output和object_output被使用
-    assert_eq!(project_info.output, "Output/bin/debug.elf", "应该使用第一个target的output");
-    assert_eq!(project_info.object_output, "Output/obj/Debug", "应该使用第一个target的object_output");
+    // 验证有2个targets
+    assert_eq!(project_info.targets.len(), 2, "应该有2个targets");
 
-    // 验证所有Build/Target节点的Compiler选项都被收集
-    assert_eq!(project_info.global_cflags.len(), 2, "应该有2个全局编译选项");
-    assert!(project_info.global_cflags.contains(&"-DDEBUG=1".to_string()), "应该包含-DDEBUG=1");
-    assert!(project_info.global_cflags.contains(&"-O2".to_string()), "应该包含-O2");
+    // 验证第一个target (Debug)
+    let debug_target = &project_info.targets[0];
+    assert_eq!(debug_target.name, "Debug");
+    assert_eq!(debug_target.output, "Output/bin/debug.elf", "Debug target的output");
+    assert_eq!(debug_target.object_output, "Output/obj/Debug", "Debug target的object_output");
+    assert_eq!(debug_target.cflags.len(), 1, "Debug target应该有1个编译选项");
+    assert!(debug_target.cflags.contains(&"-DDEBUG=1".to_string()), "Debug应该包含-DDEBUG=1");
+    assert_eq!(debug_target.include_dirs.len(), 1, "Debug target应该有1个包含目录");
+    assert!(debug_target.include_dirs.contains(&"-Isrc/debug/include".to_string()), "Debug应该包含-Isrc/debug/include");
+    assert_eq!(debug_target.linker_libs.len(), 1, "Debug target应该有1个链接库");
+    assert!(debug_target.linker_libs.contains(&"-ldebug_lib".to_string()), "Debug应该包含-ldebug_lib");
 
-    // 验证所有Build/Target节点的include目录都被收集
-    assert_eq!(project_info.include_dirs.len(), 2, "应该有2个包含目录");
-    assert!(project_info.include_dirs.contains(&"-Isrc/debug/include".to_string()), "应该包含-Isrc/debug/include");
-    assert!(project_info.include_dirs.contains(&"-Isrc/release/include".to_string()), "应该包含-Isrc/release/include");
-
-    // 验证所有Build/Target节点的库都被收集
-    assert_eq!(project_info.linker_libs.len(), 2, "应该有2个链接库");
-    assert!(project_info.linker_libs.contains(&"-ldebug_lib".to_string()), "应该包含-ldebug_lib");
-    assert!(project_info.linker_libs.contains(&"-lrelease_lib".to_string()), "应该包含-lrelease_lib");
+    // 验证第二个target (Release)
+    let release_target = &project_info.targets[1];
+    assert_eq!(release_target.name, "Release");
+    assert_eq!(release_target.output, "Output/bin/release.elf", "Release target的output");
+    assert_eq!(release_target.object_output, "Output/obj/Release", "Release target的object_output");
+    assert_eq!(release_target.cflags.len(), 1, "Release target应该有1个编译选项");
+    assert!(release_target.cflags.contains(&"-O2".to_string()), "Release应该包含-O2");
+    assert_eq!(release_target.include_dirs.len(), 1, "Release target应该有1个包含目录");
+    assert!(release_target.include_dirs.contains(&"-Isrc/release/include".to_string()), "Release应该包含-Isrc/release/include");
+    assert_eq!(release_target.linker_libs.len(), 1, "Release target应该有1个链接库");
+    assert!(release_target.linker_libs.contains(&"-lrelease_lib".to_string()), "Release应该包含-lrelease_lib");
 }
 
 #[test]
@@ -653,16 +681,16 @@ fn test_parse_library_with_path() {
     let project_info = result.unwrap();
 
     // 验证库被正确处理
-    assert_eq!(project_info.linker_libs.len(), 3, "应该有3个链接库");
+    assert_eq!(project_info.targets[0].linker_libs.len(), 3, "应该有3个链接库");
     
     // 带相对路径的库应该直接使用完整路径
-    assert!(project_info.linker_libs.contains(&"../lib/libcustom.a".to_string()), "应该包含带相对路径的库");
+    assert!(project_info.targets[0].linker_libs.contains(&"../lib/libcustom.a".to_string()), "应该包含带相对路径的库");
     
     // 带绝对路径的库应该直接使用完整路径（注意：XML中使用正斜杠，Rust代码中会保留）
-    assert!(project_info.linker_libs.contains(&"C:/path/to/lib/libabsolute.a".to_string()), "应该包含带绝对路径的库");
+    assert!(project_info.targets[0].linker_libs.contains(&"C:/path/to/lib/libabsolute.a".to_string()), "应该包含带绝对路径的库");
     
     // 普通库名应该添加-l前缀
-    assert!(project_info.linker_libs.contains(&"-lm".to_string()), "应该包含普通库名");
+    assert!(project_info.targets[0].linker_libs.contains(&"-lm".to_string()), "应该包含普通库名");
 }
 
 #[test]
@@ -753,8 +781,8 @@ fn test_parse_default_output_attributes() {
     let project_info = result.unwrap();
 
     // 验证默认output和object_output被使用
-    assert_eq!(project_info.output, "DefaultProject.elf", "应该使用默认output格式：<project_name>.elf");
-    assert_eq!(project_info.object_output, "./", "应该使用默认object_output：./");
+    assert_eq!(project_info.targets[0].output, "DefaultProject.elf", "应该使用默认output格式：<project_name>.elf");
+    assert_eq!(project_info.targets[0].object_output, "./", "应该使用默认object_output：./");
 }
 
 #[test]
@@ -782,8 +810,8 @@ fn test_parse_missing_object_output() {
     let project_info = result.unwrap();
 
     // 验证自定义output被使用，object_output是output的目录路径
-    assert_eq!(project_info.output, "custom_output.elf", "应该使用自定义output");
-    assert_eq!(project_info.object_output, "./", "应该使用output的目录路径作为object_output");
+    assert_eq!(project_info.targets[0].output, "custom_output.elf", "应该使用自定义output");
+    assert_eq!(project_info.targets[0].object_output, "./", "应该使用output的目录路径作为object_output");
 }
 
 #[test]
@@ -811,6 +839,6 @@ fn test_parse_missing_output() {
     let project_info = result.unwrap();
 
     // 验证默认output被使用，自定义object_output被使用
-    assert_eq!(project_info.output, "TestProject.elf", "应该使用默认output格式：<project_name>.elf");
-    assert_eq!(project_info.object_output, "custom_obj_dir", "应该使用自定义object_output");
+    assert_eq!(project_info.targets[0].output, "TestProject.elf", "应该使用默认output格式：<project_name>.elf");
+    assert_eq!(project_info.targets[0].object_output, "custom_obj_dir", "应该使用自定义object_output");
 }

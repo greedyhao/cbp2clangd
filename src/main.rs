@@ -170,16 +170,20 @@ fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::
     };
     debug_println!("[DEBUG] Project directory: {}", project_dir.display());
 
-    // 生成编译命令列表
+    // 生成编译命令列表 - 使用第一个target
     debug_println!("[DEBUG] Generating compile commands...");
-    let compile_commands = generate_compile_commands(&project_info, &project_dir, &toolchain);
+    let first_target = project_info.targets.first()
+        .expect("No target available in project");
+    debug_println!("[DEBUG] Using target: {}", first_target.name);
+
+    let compile_commands = generate_compile_commands(&project_info, &project_dir, &toolchain, Some(first_target));
     debug_println!(
         "[DEBUG] Compile commands generated: {}",
         compile_commands.len()
     );
 
-    // 1. 处理 Object Output (存放 CDB 和 bat)
-    let raw_obj_out = &project_info.object_output;
+    // 1. 处理 Object Output (存放 CDB 和 bat) - 使用第一个target的object_output
+    let raw_obj_out = &first_target.object_output;
     let abs_object_output = project_dir.join(raw_obj_out);
     fs::create_dir_all(&abs_object_output)?;
     // 修改：使用 compute_absolute_path 替代 canonicalize
@@ -272,6 +276,7 @@ fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::
     let base_config = generate_clangd_config(&project_info, &toolchain, args.no_header_insertion)?;
 
     // B. 生成项目专属片段 (Fragment)
+    // 注意：现在使用target特定的object_output路径
     let (current_path_match, fragment_content) = generate_clangd_fragment(
         &project_info,
         &project_dir,

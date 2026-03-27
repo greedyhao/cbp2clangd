@@ -57,12 +57,16 @@ fn find_common_ancestor(paths: &[PathBuf]) -> PathBuf {
 }
 
 /// 生成clangd配置文件内容
+/// 使用第一个target的配置（通常是Debug）
 pub fn generate_clangd_config(
     project_info: &ProjectInfo,
     toolchain: &ToolchainConfig,
     _no_header_insertion: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     debug_println!("[DEBUG generator] Starting to generate .clangd config...");
+
+    // 使用第一个target，如果没有则使用默认值
+    let target = project_info.targets.first();
 
     debug_println!("[DEBUG generator] Getting include paths from toolchain...");
     let includes = toolchain
@@ -103,29 +107,53 @@ pub fn generate_clangd_config(
         add_flags.push(flag.as_str());
     }
 
-    debug_println!("[DEBUG generator] Checking for custom march extensions...");
-    if project_info.march_info.has_custom_extension {
-        debug_println!("[DEBUG generator] Found custom extension, adding base march...");
-        if let Some(base_march) = &project_info.march_info.base_march {
-            debug_println!("[DEBUG generator] Adding base march: {}", base_march);
-            add_flags.push(base_march.as_str());
+    // 添加target特定的编译选项
+    if let Some(target) = target {
+        debug_println!("[DEBUG generator] Adding target-specific flags for '{}'...", target.name);
+        for flag in &target.cflags {
+            if flag.starts_with("-march=") {
+                debug_println!("[DEBUG generator] Skipping march flag from target: {}", flag);
+                continue;
+            }
+            if flag == "-mjump-tables-in-text" {
+                debug_println!("[DEBUG generator] Skipping jump-tables flag from target: {}", flag);
+                continue;
+            }
+            debug_println!("[DEBUG generator] Added target flag: {}", flag);
+            add_flags.push(flag.as_str());
         }
-    } else if !project_info.march_info.full_march.is_empty() {
-        // 如果没有自定义扩展，添加完整的-march选项
-        debug_println!("[DEBUG generator] No custom extension, adding full march: {}", project_info.march_info.full_march);
-        add_flags.push(&project_info.march_info.full_march[..]);
+
+        // 添加target特定的include路径
+        for inc in &target.include_dirs {
+            add_flags.push(inc.as_str());
+        }
+
+        debug_println!("[DEBUG generator] Checking for custom march extensions...");
+        if target.march_info.has_custom_extension {
+            debug_println!("[DEBUG generator] Found custom extension, adding base march...");
+            if let Some(ref base_march) = target.march_info.base_march {
+                debug_println!("[DEBUG generator] Adding base march: {}", base_march);
+                add_flags.push(base_march.as_str());
+            }
+        } else if !target.march_info.full_march.is_empty() {
+            debug_println!("[DEBUG generator] Adding full march: {}", target.march_info.full_march);
+            add_flags.push(&target.march_info.full_march[..]);
+        }
     }
 
     // 构建Remove部分
     debug_println!("[DEBUG generator] Building Remove flags section...");
     let mut remove_flags = Vec::new();
-    // 如果有-march指令，添加到Remove部分
-    if !project_info.march_info.full_march.is_empty() {
-        debug_println!(
-            "[DEBUG generator] Adding full march to Remove: {}",
-            project_info.march_info.full_march
-        );
-        remove_flags.push(&project_info.march_info.full_march[..]);
+
+    // 如果有target且有-march指令，添加到Remove部分
+    if let Some(target) = target {
+        if !target.march_info.full_march.is_empty() {
+            debug_println!(
+                "[DEBUG generator] Adding full march to Remove: {}",
+                target.march_info.full_march
+            );
+            remove_flags.push(&target.march_info.full_march[..]);
+        }
     }
     debug_println!("[DEBUG generator] Adding -mjump-tables-in-text to Remove");
     remove_flags.push("-mjump-tables-in-text");
@@ -157,11 +185,12 @@ pub fn generate_clangd_config(
 }
 
 /// 包含 PathMatch 和 CompilationDatabase
+/// 使用第一个target的object_output作为数据库路径
 pub fn generate_clangd_fragment(
     project_info: &ProjectInfo,
     project_dir: &Path,     // CBP 目录
     workspace_root: &Path,  // .clangd 根目录
-    db_path: &Path,         // compile_commands.json 目录
+    _db_path: &Path,        // compile_commands.json 目录 (现在使用target特定的路径)
 ) -> Result<(String, String), Box<dyn std::error::Error>> {
     debug_println!("[DEBUG generator] Generating clangd fragment...");
 
@@ -169,9 +198,9 @@ pub fn generate_clangd_fragment(
     let abs_source_paths: Vec<PathBuf> = project_info.source_files.iter()
         .map(|src| get_clean_absolute_path(project_dir, Path::new(&src.filename)))
         .collect();
-    
+
     let common_ancestor = find_common_ancestor(&abs_source_paths);
-    
+
     // 计算相对于 workspace_root 的路径
     let relative_ancestor = if let Ok(rel) = common_ancestor.strip_prefix(workspace_root) {
         rel
@@ -184,38 +213,52 @@ pub fn generate_clangd_fragment(
     };
 
     let rel_str = relative_ancestor.to_string_lossy().replace("\\", "/");
-    
+
     // 生成正则路径，如果是空（根目录）则匹配项目名或所有
     let path_match = if rel_str.is_empty() || rel_str == "." {
         // 如果项目就在根目录下，匹配所有子目录或者特定文件
-        ".*".to_string() 
+        ".*".to_string()
     } else {
         format!("{}/.*", rel_str)
     };
 
-    // 2. CompilationDatabase (使用绝对路径，转为正斜杠)
-    let db_path_str = db_path.to_string_lossy().replace("\\", "/");
+    // 2. CompilationDatabase (使用第一个target的object_output，转为正斜杠)
+    let db_path = if let Some(target) = project_info.targets.first() {
+        let obj_output_path = project_dir.join(&target.object_output);
+        obj_output_path.to_string_lossy().replace("\\", "/")
+    } else {
+        // 如果没有target，使用当前目录
+        ".".to_string()
+    };
 
     // 3. 生成片段内容
     let fragment = format!(
         "If:\n  PathMatch: {}\n\nCompileFlags:\n  CompilationDatabase: {}",
-        path_match, db_path_str
+        path_match, db_path
     );
 
     Ok((path_match, fragment))
 }
 
 /// 生成编译命令列表
+/// 为指定的target生成编译命令，如果不指定则使用第一个target
 pub fn generate_compile_commands(
     project_info: &crate::parser::ProjectInfo,
     project_dir: &Path,
     toolchain: &ToolchainConfig,
+    target: Option<&crate::models::BuildTarget>,
 ) -> Vec<CompileCommand> {
     debug_println!("[DEBUG generator] Starting to generate compile commands...");
     debug_println!(
         "[DEBUG generator] Project directory: {}",
         project_dir.display()
     );
+
+    // 获取要使用的target
+    let target = target.or_else(|| project_info.targets.first())
+        .expect("No target available");
+
+    debug_println!("[DEBUG generator] Generating compile commands for target: {}", target.name);
 
     // 使用工具链中的编译器路径，但如果路径不存在，使用占位符
     debug_println!("[DEBUG generator] Getting compiler path from toolchain...");
@@ -290,8 +333,18 @@ pub fn generate_compile_commands(
         base_flags.push(resolve_include_path(flag));
     }
 
-    // 2. 处理 include_dirs (parser 中已经加上了 -I 前缀)
-    for flag in &project_info.include_dirs {
+    // 2. 处理全局 include_dirs (parser 中已经加上了 -I 前缀)
+    for flag in &project_info.global_include_dirs {
+        base_flags.push(resolve_include_path(flag));
+    }
+
+    // 3. 处理target特定的编译选项
+    for flag in &target.cflags {
+        base_flags.push(resolve_include_path(flag));
+    }
+
+    // 4. 处理target特定的include路径
+    for flag in &target.include_dirs {
         base_flags.push(resolve_include_path(flag));
     }
 
@@ -482,12 +535,19 @@ fn resolve_library_path(lib: &str, lib_dirs: &[String], root_dir: &Path) -> Opti
 }
 
 /// 生成ninja构建文件内容
+/// 使用第一个target的配置（通常是Debug）
 pub fn generate_ninja_build(
     project_info: &ProjectInfo,
     project_dir: &Path,
     toolchain: &ToolchainConfig,
 ) -> Result<String, Box<dyn std::error::Error>> {
     debug_println!("[DEBUG generator] Starting to generate ninja build file...");
+
+    // 获取要使用的target
+    let target = project_info.targets.first()
+        .expect("No target available");
+
+    debug_println!("[DEBUG generator] Generating ninja build for target: {}", target.name);
 
     // 使用工具链中的编译器路径
     let compiler_path = toolchain.compiler_path();
@@ -527,7 +587,7 @@ pub fn generate_ninja_build(
 
     // 提前计算常用的标准化路径，避免重复计算
     let clean_obj_dir = {
-        let mut path = normalize_path(Path::new(&project_info.object_output));
+        let mut path = normalize_path(Path::new(&target.object_output));
         // 确保路径以分隔符结尾，以便与文件名正确连接
         if !path.ends_with('\\') && !path.ends_with('/') {
             path.push('\\');
@@ -536,7 +596,7 @@ pub fn generate_ninja_build(
     };
 
     // [FIX] 新增：计算 TARGET_OUTPUT_DIR (基于 output 文件的父目录)
-    let output_path = Path::new(&project_info.output);
+    let output_path = Path::new(&target.output);
     let target_output_dir = output_path.parent().unwrap_or(Path::new("."));
     let clean_target_output_dir = {
         let mut path = normalize_path(target_output_dir);
@@ -552,8 +612,17 @@ pub fn generate_ninja_build(
     for flag in &project_info.global_cflags {
         base_flags.push(sanitize_flag(flag)); // 确保全局CFLAGS里的路径也被转换
     }
-    for include in &project_info.include_dirs {
+    for include in &project_info.global_include_dirs {
         // -I 选项
+        let clean_path = normalize_path(Path::new(include));
+        base_flags.push(format!("{}", clean_path));
+    }
+
+    // 添加target特定的编译选项和include路径
+    for flag in &target.cflags {
+        base_flags.push(sanitize_flag(flag));
+    }
+    for include in &target.include_dirs {
         let clean_path = normalize_path(Path::new(include));
         base_flags.push(format!("{}", clean_path));
     }
@@ -602,7 +671,7 @@ pub fn generate_ninja_build(
             });
 
         // 4. 构建最终的对象文件路径：object_output + 相对结构 + .o
-        let obj_path_buf = Path::new(&project_info.object_output)
+        let obj_path_buf = Path::new(&target.object_output)
             .join(relative_structure)
             .with_extension("o");
 
@@ -639,7 +708,11 @@ pub fn generate_ninja_build(
 
         // 路径标准化处理
         let clean_file_path = normalize_path(Path::new(&special_file.filename));
-        let clean_includes = project_info.include_dirs.iter()
+        // 合并全局include和target特定include
+        let all_includes: Vec<_> = project_info.global_include_dirs.iter()
+            .chain(target.include_dirs.iter())
+            .collect();
+        let clean_includes = all_includes.iter()
             .map(|p| normalize_path(Path::new(p)))
             .collect::<Vec<_>>()
             .join(" ");
@@ -669,7 +742,7 @@ pub fn generate_ninja_build(
             let relative_structure: &Path = abs_path.strip_prefix(&common_ancestor)
                 .unwrap_or_else(|_| Path::new(&special_file.filename));
             
-            let full_path = Path::new(&project_info.object_output)
+            let full_path = Path::new(&target.object_output)
                 .join(relative_structure)
                 .with_extension("o");
                     
@@ -747,7 +820,7 @@ pub fn generate_ninja_build(
     }
 
     // 链接目标
-    let mut target_name = normalize_path(Path::new(&project_info.output));
+    let mut target_name = normalize_path(Path::new(&target.output));
 
     // 检查是否为静态库目标（.a结尾）
     let is_static_lib = target_name.ends_with(".a");
@@ -817,15 +890,21 @@ pub fn generate_ninja_build(
         let mut resolved_lib_dependencies = Vec::new();
 
         debug_println!("[DEBUG generator] Resolving library dependencies...");
-        
-        for lib in &project_info.linker_libs {
+
+        // 合并全局链接库和target特定的链接库
+        let all_libs: Vec<_> = project_info.global_linker_libs.iter()
+            .chain(target.linker_libs.iter())
+            .collect();
+        let all_lib_dirs: Vec<String> = target.linker_lib_dirs.clone();
+
+        for lib in &all_libs {
             // 在这里应用 sanitize_flag
-            // 这样无论是 "-lmath", "libs/libmath.a", 还是 "../libs/libfoo.a" 
+            // 这样无论是 "-lmath", "libs/libmath.a", 还是 "../libs/libfoo.a"
             // 都会变成 Windows 风格 (../libs/libfoo.a -> ..\libs\libfoo.a)
-            lib_flags.push(sanitize_flag(lib)); 
+            lib_flags.push(sanitize_flag(lib));
 
             // 依赖解析逻辑（用于 ninja 的 implicit deps）
-            if let Some(resolved_path) = resolve_library_path(lib, &project_info.linker_lib_dirs, project_dir) {
+            if let Some(resolved_path) = resolve_library_path(lib, &all_lib_dirs, project_dir) {
                 debug_println!("[DEBUG generator] Resolved library {} to {}", lib, resolved_path);
                 resolved_lib_dependencies.push(resolved_path);
             } else {
@@ -834,14 +913,14 @@ pub fn generate_ninja_build(
         }
 
         // 添加链接器选项
-        for opt in &project_info.linker_options {
+        for opt in &target.linker_options {
             let replaced_opt = opt.replace("$(TARGET_OBJECT_DIR)", &clean_obj_dir);
             let replaced_opt = replaced_opt.replace("$(TARGET_OUTPUT_DIR)", &clean_target_output_dir);
             // Linker options 可能包含 -Map=output/path.map 之类的，需要转换路径分隔符
             pre_link_flags.push(sanitize_flag(&replaced_opt));
         }
         // 添加链接库目录
-        for lib_dir in &project_info.linker_lib_dirs {
+        for lib_dir in &target.linker_lib_dirs {
             // 统一处理 -L 标志
             if lib_dir.starts_with("-L") {
                 let path_part = &lib_dir[2..];
@@ -1502,15 +1581,25 @@ mod tests {
     #[test]
     fn test_variable_substitution_logic() {
         use crate::models::SpecialFileBuildInfo;
+        use crate::models::BuildTarget;
         use crate::parser::ProjectInfo;
+
+        // 创建 BuildTarget
+        let target = BuildTarget {
+            name: "Debug".to_string(),
+            output: "bin/Debug/app.elf".to_string(),
+            object_output: "obj/Debug/".to_string(),
+            ..Default::default()
+        };
 
         // 模拟 ProjectInfo
         let project = ProjectInfo {
-            // ... 其他字段填充默认值 ...
             compiler_id: "gcc".to_string(),
             project_name: "Test".to_string(),
             global_cflags: vec![],
-            include_dirs: vec![],
+            global_include_dirs: vec![],
+            global_linker_libs: vec![],
+            global_linker_options: vec![],
             source_files: vec![],
             special_files: vec![
                 SpecialFileBuildInfo {
@@ -1524,12 +1613,7 @@ mod tests {
             ],
             prebuild_commands: vec![],
             postbuild_commands: vec![],
-            march_info: crate::models::MarchInfo::default(),
-            object_output: "obj/Debug/".to_string(),     // 这是 OBJECT_DIR
-            output: "bin/Debug/app.elf".to_string(),     // 這是 OUTPUT_DIR 的文件
-            linker_options: vec![],
-            linker_libs: vec![],
-            linker_lib_dirs: vec![],
+            targets: vec![target],
             linker_type: "gcc".to_string(),
         };
 

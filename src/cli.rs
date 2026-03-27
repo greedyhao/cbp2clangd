@@ -120,8 +120,11 @@ fn parse_merge_compile_commands(
             .unwrap_or_else(|| Path::new("."));
 
         // 计算 compile_commands.json 的绝对路径
-        // 逻辑与 main.rs 中的 convert 命令相同
-        let abs_object_output = project_dir.join(&project_info.object_output);
+        // 逻辑与 main.rs 中的 convert 命令相同，使用第一个target的object_output
+        let object_output = project_info.targets.first()
+            .map(|t| t.object_output.clone())
+            .unwrap_or_else(|| "./".to_string());
+        let abs_object_output = project_dir.join(&object_output);
 
         // 规范化路径
         let normalized_output_dir = crate::utils::get_clean_absolute_path(
