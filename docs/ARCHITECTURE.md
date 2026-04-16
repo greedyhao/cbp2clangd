@@ -9,6 +9,7 @@
 - **CBP 转换**: 将 Code::Blocks 项目文件转换为 clangd 可用的 compile_commands.json
 - **多项目合并**: 支持将多个 CBP 项目的 compile_commands.json 合并
 - **配置文件生成**: 自动生成 .clangd、build.ninja、build.bat 等文件
+- **动态编译器配置**: 从 Code::Blocks 的 default.conf 读取编译器路径，支持自定义安装路径
 
 ---
 
@@ -39,7 +40,13 @@
    ┌───────────┐   ┌───────────┐   ┌───────────┐
    │ parser.rs │   │ config.rs │   │ utils.rs  │
    │ CBP解析   │   │ 工具链配置 │   │ 工具函数  │
-   └───────────┘   └───────────┘   └───────────┘
+   └───────────┘   └─────┬─────┘   └───────────┘
+                         │
+                         ▼
+                  ┌───────────────┐
+                  │ cb_config.rs  │
+                  │ CB配置读取    │ ◄─── %APPDATA%\CodeBlocks\default.conf
+                  └───────────────┘
 ```
 
 ---
@@ -93,17 +100,12 @@ pub struct ProjectInfo {
     pub compiler_id: String,       // 编译器 ID (如 riscv32-v2)
     pub project_name: String,       // 项目名称
     pub global_cflags: Vec<String>, // 全局编译选项
-    pub include_dirs: Vec<String>,  // 包含目录 (-I...)
+    pub global_include_dirs: Vec<String>,  // 全局包含目录 (-I...)
     pub source_files: Vec<SourceFileInfo>,    // 源文件列表
     pub special_files: Vec<SpecialFileBuildInfo>, // 特殊文件
     pub prebuild_commands: Vec<String>,  // 预构建命令
     pub postbuild_commands: Vec<String>, // 后构建命令
-    pub march_info: MarchInfo,      // RISC-V 架构信息
-    pub object_output: String,     // 对象文件输出目录
-    pub output: String,             // 输出文件路径
-    pub linker_options: Vec<String>,// 链接器选项
-    pub linker_libs: Vec<String>,   // 链接库
-    pub linker_lib_dirs: Vec<String>, // 库目录
+    pub targets: Vec<BuildTarget>,  // 各个Build Target的配置
     pub linker_type: String,       // 链接器类型
 }
 ```
@@ -157,11 +159,124 @@ XML 内容
 
 ---
 
-### 3.4 config.rs - 工具链配置
+### 3.4 cb_config.rs - Code::Blocks 配置读取
 
-**职责**: 管理不同编译器版本的工具链路径
+**职责**: 从 Code::Blocks 的 `default.conf` 读取编译器配置信息
 
-**支持的编译器**:
+**配置文件位置**: `%APPDATA%\CodeBlocks\default.conf`
+
+**XML 格式**:
+
+```xml
+<CodeBlocksConfig version="1">
+  <compiler>
+    <DEFAULT_COMPILER><str><![CDATA[gcc]]></str></DEFAULT_COMPILER>
+    <sets>
+      <riscv32-v2>
+        <NAME><str><![CDATA[RISC-V 32-bit GCC V2]]></str></NAME>
+        <MASTER_PATH><str><![CDATA[C:\path\to\toolchain]]></str></MASTER_PATH>
+        <INCLUDE_DIRS><str><![CDATA[path1;path2;]]></str></INCLUDE_DIRS>
+        <LIBRARY_DIRS><str><![CDATA[path1;path2;]]></str></LIBRARY_DIRS>
+      </riscv32-v2>
+    </sets>
+  </compiler>
+</CodeBlocksConfig>
+```
+
+**核心结构**:
+
+```rust
+// 单个编译器条目
+pub struct CbCompilerEntry {
+    pub compiler_id: String,
+    pub master_path: Option<String>,     // 工具链安装根路径
+    pub include_dirs: Vec<String>,       // 额外头文件目录 (分号分隔)
+    pub library_dirs: Vec<String>,       // 额外库目录 (分号分隔)
+}
+
+// 编译器配置集合
+pub struct CbCompilerConfig {
+    pub compilers: HashMap<String, CbCompilerEntry>,
+    pub default_compiler: Option<String>,
+}
+```
+
+**核心函数**:
+
+| 函数 | 说明 |
+|------|------|
+| `find_default_conf()` | 定位 `%APPDATA%\CodeBlocks\default.conf`，不存在返回 None |
+| `parse_default_conf(xml)` | 解析 XML 内容为 `CbCompilerConfig`，使用 `roxmltree` |
+| `load_cb_compiler_config()` | 便捷函数：查找并加载配置，失败静默返回 None |
+
+**降级策略**: 如果 `default.conf` 不存在或无法读取，工具链配置将降级到 `config.rs` 中的 hardcoded 默认值，不影响正常使用。
+
+---
+
+### 3.5 config.rs - 工具链配置
+
+**职责**: 管理不同编译器版本的工具链路径，支持两阶段解析
+
+**两阶段解析流程**:
+
+```
+CBP 中的 compiler_id
+         │
+         ▼
+┌─────────────────────────────┐
+│ 1. 尝试从 default.conf 获取  │
+│    master_path               │
+│    (通过 cb_config.rs)       │
+└──────────┬──────────────────┘
+           │
+     ┌─────┴─────┐
+     ▼           ▼
+   找到        未找到
+     │           │
+     │     ┌─────┴─────┐
+     │     ▼           ▼
+     │   有hardcoded  无hardcoded
+     │   默认值?      默认值?
+     │     │           │
+     │   降级使用    报错退出
+     │   默认路径    (列出可用编译器)
+     ▼     ▼
+  使用 CB 配置中的路径
+```
+
+**解析入口**:
+
+```rust
+// 推荐使用：支持 CB 配置 + 错误报告
+ToolchainConfig::resolve_toolchain(compiler_id, cb_config)
+    -> Result<ToolchainConfig, ToolchainResolveError>
+
+// 旧 API：仅 hardcoded 默认值，向后兼容
+ToolchainConfig::from_compiler_id(compiler_id)
+    -> Option<ToolchainConfig>
+```
+
+**错误类型**:
+
+```rust
+pub enum ToolchainResolveError {
+    UnknownCompiler {
+        compiler_id: String,
+        available: Vec<String>,  // 列出所有可用编译器
+    },
+}
+```
+
+**ToolchainConfig 字段**:
+
+| 字段 | 说明 |
+|------|------|
+| `version_name` | 版本名 (如 "V2")，从 hardcoded 映射或从 compiler_id 推导 |
+| `gcc_version` | GCC 版本号 (如 "10.2.0")，仅 hardcoded 映射 |
+| `toolchain_base_path` | 自定义路径，来自 default.conf 的 MASTER_PATH |
+| `cb_include_dirs` | 额外 include 路径，来自 default.conf 的 INCLUDE_DIRS |
+
+**Hardcoded 版本映射** (default.conf 不含此信息):
 
 | Compiler ID | 版本名 | GCC 版本 | 默认路径 |
 |-------------|--------|----------|----------|
@@ -171,16 +286,17 @@ XML 内容
 
 **ToolchainConfig 方法**:
 
-- `from_compiler_id()` - 根据编译器 ID 创建配置
+- `resolve_toolchain()` - 两阶段解析 (推荐入口)
+- `from_compiler_id()` - 仅 hardcoded (旧 API)
 - `compiler_path()` - 获取编译器路径
 - `linker_path()` - 获取链接器路径
 - `ar_path()` - 获取 ar 工具路径
-- `include_paths()` - 获取标准 include 目录
+- `include_paths()` - 获取标准 include 目录 (含 CB 额外路径)
 - `is_compiler_available()` - 检查编译器是否可用
 
 ---
 
-### 3.5 utils.rs - 工具函数
+### 3.6 utils.rs - 工具函数
 
 **职责**: 提供路径处理和 Windows API 调用等工具函数
 
@@ -196,7 +312,7 @@ XML 内容
 
 ---
 
-### 3.6 models.rs - 数据模型
+### 3.7 models.rs - 数据模型
 
 **职责**: 定义项目中使用的核心数据结构
 
@@ -249,6 +365,13 @@ pub struct MarchInfo {
            │
            ▼
 ┌─────────────────────┐
+│ cb_config.rs        │
+│ 读取 default.conf   │
+│ → CbCompilerConfig  │
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
 │ parser.rs           │
 │ 解析 CBP XML        │
 │ → ProjectInfo       │
@@ -257,8 +380,13 @@ pub struct MarchInfo {
            ▼
 ┌─────────────────────┐
 │ config.rs           │
-│ 确定工具链配置       │
+│ resolve_toolchain() │
 │ → ToolchainConfig   │
+│                     │
+│ 优先级:             │
+│  1. default.conf    │
+│  2. hardcoded 默认  │
+│  3. 报错退出        │
 └──────────┬──────────┘
            │
            ▼
@@ -303,7 +431,7 @@ pub struct MarchInfo {
 
 | 依赖 | 版本 | 用途 |
 |------|------|------|
-| roxmltree | 0.18 | XML 解析 |
+| roxmltree | 0.18 | XML 解析 (CBP + default.conf) |
 | serde_json | 1.0 | JSON 序列化/反序列化 |
 | windows-sys | 0.52 | Windows API 调用 |
 
@@ -314,9 +442,11 @@ main.rs
   │
   ├─► cli.rs (parse_args)
   │
+  ├─► cb_config.rs (load_cb_compiler_config)
+  │
   ├─► parser.rs (parse_cbp_file)
   │
-  ├─► config.rs (ToolchainConfig)
+  ├─► config.rs (ToolchainConfig::resolve_toolchain)
   │
   └─► generator.rs
           │
@@ -331,6 +461,10 @@ cli.rs
   │
   └─► utils.rs (get_clean_absolute_path)
 
+cb_config.rs
+  │
+  └─► utils.rs (debug_println!)
+
 parser.rs
   │
   ├─► config.rs (ToolchainConfig)
@@ -339,7 +473,9 @@ parser.rs
 
 config.rs
   │
-  └─► (无外部依赖)
+  ├─► cb_config.rs (CbCompilerConfig)
+  │
+  └─► utils.rs (debug_println!)
 
 utils.rs
   │
@@ -432,13 +568,14 @@ CompileFlags:
 
 ### 8.1 添加新编译器支持
 
-在 `config.rs` 的 `from_compiler_id()` 方法中添加新的匹配分支：
+如果 `default.conf` 存在且包含新编译器条目，无需修改代码。只需在 Code::Blocks 中安装并注册新编译器即可。
+
+如果需要添加 hardcoded 版本映射（用于没有 `default.conf` 的场景），在 `config.rs` 的 `get_hardcoded_defaults()` 函数中添加新的匹配分支：
 
 ```rust
-"new-compiler" => Some(ToolchainConfig {
-    version_name: "Vx".to_string(),
+"riscv32-v4" => Some(HardcodedToolchainInfo {
+    version_name: "V4".to_string(),
     gcc_version: "x.x.x".to_string(),
-    toolchain_base_path: None,
 }),
 ```
 

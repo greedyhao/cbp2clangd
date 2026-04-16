@@ -2,8 +2,10 @@ use std::env;
 use std::fs;
 
 use cbp2clangd::{
-    Command, ToolchainConfig, compute_absolute_path, debug_println, generate_build_script, generate_compile_commands,
-    generate_ninja_build, merge_compile_commands, parse_args, parse_cbp_file, set_debug_mode,
+    Command, ToolchainConfig, ToolchainResolveError, compute_absolute_path, debug_println,
+    generate_build_script, generate_compile_commands, generate_ninja_build,
+    merge_compile_commands, parse_args, parse_cbp_file, set_debug_mode,
+    load_cb_compiler_config,
     // 引入两个生成函数
     generate_clangd_config, generate_clangd_fragment,
 };
@@ -132,14 +134,25 @@ fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::
         "[DEBUG] Determining toolchain configuration for compiler: {}",
         project_info.compiler_id
     );
-    let toolchain =
-        ToolchainConfig::from_compiler_id(&project_info.compiler_id).unwrap_or_else(|| {
-            eprintln!(
-                "Warning: Unknown compiler '{}', falling back to v2",
-                project_info.compiler_id
-            );
-            ToolchainConfig::from_compiler_id("riscv32-v2").unwrap()
-        });
+
+    // 加载 Code::Blocks 编译器配置 (如果存在)
+    let cb_config = load_cb_compiler_config();
+    if cb_config.is_some() {
+        debug_println!("[DEBUG] Loaded Code::Blocks compiler config from default.conf");
+    } else {
+        debug_println!("[DEBUG] default.conf not found or unreadable, using hardcoded defaults");
+    }
+
+    // 解析工具链配置
+    let toolchain = match ToolchainConfig::resolve_toolchain(&project_info.compiler_id, cb_config.as_ref()) {
+        Ok(config) => config,
+        Err(ToolchainResolveError::UnknownCompiler { compiler_id, available }) => {
+            eprintln!("Error: CBP 文件引用了未知的编译器 '{}'", compiler_id);
+            eprintln!("可用的编译器: {}", available.join(", "));
+            eprintln!("请在 Code::Blocks 中安装该编译器，或检查 CBP 文件的 <Option compiler=\"...\"> 设置");
+            return Err(format!("Unknown compiler: {}", compiler_id).into());
+        }
+    };
     debug_println!("[DEBUG] Toolchain config created successfully");
 
     // 检查编译器是否可用
