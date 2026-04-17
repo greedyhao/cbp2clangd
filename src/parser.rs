@@ -12,6 +12,7 @@ pub struct ProjectInfo {
     pub global_include_dirs: Vec<String>,    // 全局头文件目录 (Project/Compiler)
     pub global_linker_libs: Vec<String>,     // 全局链接库 (Project/Linker)
     pub global_linker_options: Vec<String>,  // 全局链接器选项 (Project/Linker)
+    pub global_linker_lib_dirs: Vec<String>, // 全局库搜索路径 (Project/Linker)
     pub source_files: Vec<SourceFileInfo>,
     pub special_files: Vec<SpecialFileBuildInfo>,
     pub prebuild_commands: Vec<String>,
@@ -100,6 +101,7 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
 
     // 解析Project级别Linker节点
     let mut global_linker_options = Vec::new();
+    let mut global_linker_lib_dirs = Vec::new();
     if let Some(linker_node) = project.children().find(|n| n.tag_name().name() == "Linker") {
         for add in linker_node
             .children()
@@ -111,6 +113,9 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
             }
             if let Some(opt) = add.attribute("option") {
                 global_linker_options.push(opt.to_string());
+            }
+            if let Some(dir) = add.attribute("directory") {
+                global_linker_lib_dirs.push(format!("-L{}", dir));
             }
         }
     }
@@ -409,6 +414,7 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
         global_include_dirs,
         global_linker_libs,
         global_linker_options,
+        global_linker_lib_dirs,
         source_files,
         special_files,
         prebuild_commands,

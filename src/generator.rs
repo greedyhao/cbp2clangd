@@ -895,7 +895,10 @@ pub fn generate_ninja_build(
         let all_libs: Vec<_> = project_info.global_linker_libs.iter()
             .chain(target.linker_libs.iter())
             .collect();
-        let all_lib_dirs: Vec<String> = target.linker_lib_dirs.clone();
+        let all_lib_dirs: Vec<String> = project_info.global_linker_lib_dirs.iter()
+            .chain(target.linker_lib_dirs.iter())
+            .cloned()
+            .collect();
 
         for lib in &all_libs {
             // 在这里应用 sanitize_flag
@@ -912,14 +915,30 @@ pub fn generate_ninja_build(
             }
         }
 
-        // 添加链接器选项
+        // 添加链接器选项 (全局 + target特定)
+        for opt in &project_info.global_linker_options {
+            let replaced_opt = opt.replace("$(TARGET_OBJECT_DIR)", &clean_obj_dir);
+            let replaced_opt = replaced_opt.replace("$(TARGET_OUTPUT_DIR)", &clean_target_output_dir);
+            pre_link_flags.push(sanitize_flag(&replaced_opt));
+        }
         for opt in &target.linker_options {
             let replaced_opt = opt.replace("$(TARGET_OBJECT_DIR)", &clean_obj_dir);
             let replaced_opt = replaced_opt.replace("$(TARGET_OUTPUT_DIR)", &clean_target_output_dir);
             // Linker options 可能包含 -Map=output/path.map 之类的，需要转换路径分隔符
             pre_link_flags.push(sanitize_flag(&replaced_opt));
         }
-        // 添加链接库目录
+        // 添加链接库目录 (全局 + target特定)
+        for lib_dir in &project_info.global_linker_lib_dirs {
+            // 统一处理 -L 标志
+            if lib_dir.starts_with("-L") {
+                let path_part = &lib_dir[2..];
+                // normalize_str 替换斜杠
+                let clean_part = normalize_str(path_part);
+                pre_link_flags.push(format!("-L{}", clean_part));
+            } else {
+                pre_link_flags.push(normalize_str(lib_dir));
+            }
+        }
         for lib_dir in &target.linker_lib_dirs {
             // 统一处理 -L 标志
             if lib_dir.starts_with("-L") {
@@ -1600,6 +1619,7 @@ mod tests {
             global_include_dirs: vec![],
             global_linker_libs: vec![],
             global_linker_options: vec![],
+            global_linker_lib_dirs: vec![],
             source_files: vec![],
             special_files: vec![
                 SpecialFileBuildInfo {

@@ -579,6 +579,57 @@ fn test_parse_linker_options() {
 }
 
 #[test]
+fn test_parse_project_linker_add_directory() {
+    // 创建一个包含Project级别Linker/Add directory的XML内容
+    let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<CodeBlocks_project_file>
+    <FileVersion major="1" minor="6" />
+    <Project>
+        <Option title="TestProject" />
+        <Build>
+            <Target title="Debug">
+                <Option output="Output/bin/test.elf" prefix_auto="1" extension_auto="0" />
+                <Option object_output="Output/obj/Debug" />
+            </Target>
+        </Build>
+        <Linker>
+            <Add library="m" />
+            <Add directory="platform/libs" />
+            <Add directory="../common/lib" />
+        </Linker>
+        <Unit filename="src/main.c">
+            <Option compile="1" />
+        </Unit>
+    </Project>
+</CodeBlocks_project_file>"#;
+
+    let result = parse_cbp_file(xml_content);
+    assert!(result.is_ok());
+    let project_info = result.unwrap();
+
+    // 验证项目基本信息
+    assert_eq!(project_info.project_name, "TestProject");
+
+    // 验证Project级别Linker的链接库目录被正确解析
+    assert_eq!(project_info.global_linker_lib_dirs.len(), 2, "应该有2个链接库目录");
+    assert!(
+        project_info.global_linker_lib_dirs.contains(&"-Lplatform/libs".to_string()),
+        "应该包含链接库目录 -Lplatform/libs"
+    );
+    assert!(
+        project_info.global_linker_lib_dirs.contains(&"-L../common/lib".to_string()),
+        "应该包含链接库目录 -L../common/lib"
+    );
+
+    // 验证Project级别Linker的链接库被正确解析
+    assert_eq!(project_info.global_linker_libs.len(), 1, "应该有1个链接库");
+    assert!(
+        project_info.global_linker_libs.contains(&"-lm".to_string()),
+        "应该包含链接库 -lm"
+    );
+}
+
+#[test]
 fn test_parse_multiple_build_targets() {
     // 创建一个包含多个Build/Target节点的XML内容
     let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
