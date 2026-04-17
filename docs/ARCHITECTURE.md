@@ -97,16 +97,33 @@ pub struct MergeCompileCommandsArgs {
 
 ```rust
 pub struct ProjectInfo {
-    pub compiler_id: String,       // 编译器 ID (如 riscv32-v2)
-    pub project_name: String,       // 项目名称
-    pub global_cflags: Vec<String>, // 全局编译选项
-    pub global_include_dirs: Vec<String>,  // 全局包含目录 (-I...)
-    pub source_files: Vec<SourceFileInfo>,    // 源文件列表
+    pub compiler_id: String,              // 编译器 ID (如 riscv32-v2)
+    pub project_name: String,              // 项目名称
+    pub global_cflags: Vec<String>,        // 全局编译选项 (Project/Compiler)
+    pub global_include_dirs: Vec<String>,  // 全局包含目录 (Project/Compiler)
+    pub global_linker_libs: Vec<String>,   // 全局链接库 (Project/Linker)
+    pub global_linker_options: Vec<String>,// 全局链接器选项 (Project/Linker)
+    pub global_linker_lib_dirs: Vec<String>,// 全局库搜索路径 (Project/Linker)
+    pub source_files: Vec<SourceFileInfo>,        // 源文件列表
     pub special_files: Vec<SpecialFileBuildInfo>, // 特殊文件
-    pub prebuild_commands: Vec<String>,  // 预构建命令
-    pub postbuild_commands: Vec<String>, // 后构建命令
-    pub targets: Vec<BuildTarget>,  // 各个Build Target的配置
-    pub linker_type: String,       // 链接器类型
+    pub prebuild_commands: Vec<String>,     // 预构建命令
+    pub postbuild_commands: Vec<String>,    // 后构建命令
+    pub targets: Vec<BuildTarget>,          // 各个 Build Target 的配置
+    pub linker_type: String,                // 链接器类型
+}
+
+// BuildTarget: 单个构建目标的配置
+pub struct BuildTarget {
+    pub name: String,                      // 目标名称 (如 Debug/Release)
+    pub output: String,                    // 输出文件路径
+    pub object_output: String,              // 中间文件输出目录
+    pub cflags: Vec<String>,               // 编译选项 (Target/Compiler)
+    pub defines: Vec<String>,              // 宏定义 (-D)
+    pub include_dirs: Vec<String>,          // 包含目录 (Target/Compiler)
+    pub linker_options: Vec<String>,        // 链接器选项 (Target/Linker)
+    pub linker_libs: Vec<String>,           // 链接库 (Target/Linker)
+    pub linker_lib_dirs: Vec<String>,       // 库搜索路径 (Target/Linker)
+    pub march_info: MarchInfo,             // RISC-V -march 信息
 }
 ```
 
@@ -125,12 +142,17 @@ XML 内容
 提取 Project 节点
     │
     ├── 提取 Project/Option (title, compiler)
-    ├── 提取 Compiler (全局选项、包含目录)
-    ├── 提取 Linker (库、库目录)
-    ├── 提取 Build/Target (目标配置、库、宏定义)
+    ├── 提取 Project/Compiler → global_cflags, global_include_dirs
+    ├── 提取 Project/Linker → global_linker_libs, global_linker_options, global_linker_lib_dirs
+    ├── 提取 Build/Target (每个 Target):
+    │       ├── Option → output, object_output
+    │       ├── Compiler → cflags, defines, include_dirs, march_info
+    │       └── Linker → linker_options, linker_libs, linker_lib_dirs
     ├── 提取 Unit (源文件、编译标志)
     └── 提取 ExtraCommands (预/后构建命令)
 ```
+
+**合并策略**: generator 在生成 build.ninja 和 compile_commands.json 时，会将全局字段（`global_*`）与第一个 target 的字段合并使用。
 
 ---
 
@@ -156,6 +178,18 @@ XML 内容
 - `generate_clangd_fragment()` - 生成 .clangd 项目片段
 - `merge_clangd_config()` - 合并 .clangd 配置
 - `merge_compile_commands()` - 合并多个 compile_commands.json
+
+**多 Target 合并策略**:
+
+generator 使用第一个 target（通常是 Debug）的配置进行生成。全局字段与 target 字段在链接阶段合并：
+
+| 字段 | 全局来源 | Target 来源 | 合并方式 |
+|------|----------|-------------|----------|
+| 链接库 | `global_linker_libs` | `target.linker_libs` | `.chain()` 拼接 |
+| 链接器选项 | `global_linker_options` | `target.linker_options` | 循环遍历 |
+| 库搜索路径 | `global_linker_lib_dirs` | `target.linker_lib_dirs` | 循环遍历 |
+| 输出文件 | - | `target.output` | 直接使用 |
+| 中间目录 | - | `target.object_output` | 直接使用 |
 
 ---
 

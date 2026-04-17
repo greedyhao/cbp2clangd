@@ -21,6 +21,7 @@
 - 智能处理特殊文件：普通文件默认编译链接，特殊文件需明确指定 compile="1"才编译
 - 修复了特殊文件编译命令没有运行的问题，确保所有需要编译的特殊文件都能正确触发编译
 - 特殊文件输出作为隐式依赖添加到链接规则中，类似库文件的处理方式
+- **支持多 Target**: 解析并支持 Debug/Release 等多个 Build Target，使用第一个 Target 配置进行生成
 - **支持多项目合并**：通过 `merge-compile-commands` 命令合并多个 CBP 项目的 compile_commands.json
 - **.clangd 优化**：合并时自动将 CompilationDatabase 整合到主 CompileFlags 块中
 
