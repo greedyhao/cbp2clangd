@@ -85,6 +85,7 @@ pub struct MergeCompileCommandsArgs {
 |------|------|
 | 转换 | `cbp2clangd project.cbp [output_dir]` |
 | 合并 | `cbp2clangd merge-compile-commands proj1.cbp proj2.cbp` |
+| 合并 (JSON) | `cbp2clangd merge-compile-commands --json cc1.json cc2.json` |
 | 版本 | `cbp2clangd --version` |
 
 ---
@@ -436,12 +437,14 @@ pub struct MarchInfo {
 
 ### 4.2 多项目合并流程
 
+**CBP 模式** (默认):
 ```
 用户输入: cbp2clangd merge-compile-commands proj1.cbp proj2.cbp
          │
          ▼
 ┌─────────────────────┐
 │ cli.rs              │
+│ 检查 .cbp 扩展名    │
 │ 解析每个 CBP        │
 │ 获取 compile_commands.json 路径 │
 └──────────┬──────────┘
@@ -453,7 +456,32 @@ pub struct MarchInfo {
 │ commands()          │
 │                     │
 │ 合并 JSON 数组      │
-│ 输出到 output_dir   │
+│ 写回第一个 JSON     │
+│ 生成 .clangd        │
+└─────────────────────┘
+```
+
+**JSON 模式** (`--json`):
+```
+用户输入: cbp2clangd merge-compile-commands --json cc1.json cc2.json
+         │
+         ▼
+┌─────────────────────┐
+│ cli.rs              │
+│ 跳过 CBP 解析       │
+│ 直接使用 JSON 路径  │
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│ generator.rs        │
+│ merge_compile_      │
+│ commands()          │
+│                     │
+│ 合并 JSON 数组      │
+│ 写回第一个 JSON     │
+│ .clangd 写入第一个  │
+│ JSON 的父目录       │
 └─────────────────────┘
 ```
 
@@ -465,7 +493,7 @@ pub struct MarchInfo {
 
 | 依赖 | 版本 | 用途 |
 |------|------|------|
-| roxmltree | 0.18 | XML 解析 (CBP + default.conf) |
+| roxmltree | 0.21.1 | XML 解析 (CBP + default.conf) |
 | serde_json | 1.0 | JSON 序列化/反序列化 |
 | windows-sys | 0.52 | Windows API 调用 |
 
@@ -544,12 +572,17 @@ cbp2clangd [OPTIONS] <project.cbp> [output_dir]
 ### 6.2 合并命令
 
 ```bash
-cbp2clangd merge-compile-commands <project1.cbp> [project2.cbp ...] [OPTIONS]
+cbp2clangd merge-compile-commands [--json] <file1> <file2> ... [OPTIONS]
 
 选项:
-  --output-dir <dir>   指定工作区根目录（.clangd 所在目录）
+  --json               直接合并 compile_commands.json 文件（跳过 CBP 解析）
+  --output-dir <dir>   指定工作区根目录（.clangd 所在目录，CBP 模式专用）
   --debug              启用调试日志
 ```
+
+**CBP 模式**（默认）：输入 `.cbp` 文件，工具自动从 CBP 的 target 配置中定位 `compile_commands.json` 路径并进行合并。非 `.cbp` 文件会报错退出。
+
+**JSON 模式**（`--json`）：输入文件直接作为 `compile_commands.json` 路径，合并结果写入第一个 JSON 文件，`.clangd` 写入其父目录。此模式下不允许使用 `--output-dir`。
 
 ---
 

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-04-29
+### Added
+- 添加 merge-compile-commands 子命令，支持合并多个 CBP 项目的 compile_commands.json
+- merge-compile-commands 添加 --json 标志，支持直接合并 compile_commands.json 文件
+- 添加 --output-dir 参数，用于指定 .clangd 文件的工作区根目录
+
+### Changed
+- CBP 解析改为从 Code::Blocks 的 default.conf 读取工具链配置（MASTER_PATH、INCLUDE_DIRS），支持自定义安装路径
+- 识别不同 Build Target 的配置（如 Debug/Release），使用第一个 target 的 object_output
+
+### Fixed
+- CBP 模式下检查文件扩展名，非 .cbp 文件直接报错，避免误导性错误
+- 修复编译问题
+
 ## [1.2.8] - 2026-01-16
 ### Added
 - 添加 SourceFileInfo 结构，用于保存普通源文件的编译和链接信息
