@@ -74,9 +74,20 @@ fn parse_merge_compile_commands(
     // 移除程序名（索引 0），现在只保留参数
     args.remove(0);
 
+    // 检查并移除 --json 标志
+    let direct_json = args.iter().any(|arg| arg == "--json");
+    if let Some(pos) = args.iter().position(|arg| arg == "--json") {
+        args.remove(pos);
+    }
+
     // 检查并移除 --output-dir 参数
     let mut output_dir = None;
     if let Some(pos) = args.iter().position(|arg| arg == "--output-dir") {
+        if direct_json {
+            eprintln!("Error: --output-dir is not allowed with --json mode");
+            print_merge_usage(&program_name);
+            std::process::exit(1);
+        }
         if pos + 1 < args.len() {
             output_dir = Some(PathBuf::from(&args[pos + 1]));
             args.remove(pos + 1);
@@ -88,68 +99,104 @@ fn parse_merge_compile_commands(
         }
     }
 
-    // 剩余的都是 CBP 文件路径
-    let cbp_paths: Vec<PathBuf> = args.into_iter().map(PathBuf::from).collect();
+    // 剩余的都是输入文件路径
+    let input_paths: Vec<PathBuf> = args.into_iter().map(PathBuf::from).collect();
 
-    if cbp_paths.is_empty() {
-        eprintln!("Error: At least one CBP project file is required");
+    if input_paths.is_empty() {
+        if direct_json {
+            eprintln!("Error: At least one compile_commands.json file is required");
+        } else {
+            eprintln!("Error: At least one CBP project file is required");
+        }
         print_merge_usage(&program_name);
         std::process::exit(1);
     }
 
-    if cbp_paths.len() < 2 {
-        eprintln!("Warning: Only one CBP file provided, nothing to merge");
+    if input_paths.len() < 2 {
+        eprintln!("Warning: Only one input file provided, nothing to merge");
     }
 
-    // 解析每个 CBP 文件，获取 compile_commands.json 的路径
-    let mut json_paths: Vec<PathBuf> = Vec::new();
-    for cbp_path in &cbp_paths {
-        // 检查 CBP 文件是否存在
-        if !cbp_path.exists() {
-            eprintln!("Warning: CBP file not found, skipping: {}", cbp_path.display());
-            continue;
+    let (json_paths, output_dir) = if direct_json {
+        // --json 模式：路径直接就是 compile_commands.json 文件
+        for json_path in &input_paths {
+            if !json_path.exists() {
+                eprintln!("Warning: JSON file not found, skipping: {}", json_path.display());
+            }
         }
-
-        // 读取并解析 CBP 文件
-        let xml_content = std::fs::read_to_string(cbp_path)?;
-        let project_info = parse_cbp_file(&xml_content)?;
-
-        // 获取项目目录（cbp 文件所在目录）
-        let project_dir = cbp_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."));
-
-        // 计算 compile_commands.json 的绝对路径
-        // 逻辑与 main.rs 中的 convert 命令相同，使用第一个target的object_output
-        let object_output = project_info.targets.first()
-            .map(|t| t.object_output.clone())
-            .unwrap_or_else(|| "./".to_string());
-        let abs_object_output = project_dir.join(&object_output);
-
-        // 规范化路径
-        let normalized_output_dir = crate::utils::get_clean_absolute_path(
-            project_dir,
-            Path::new(&abs_object_output),
-        );
-
-        // 构建 compile_commands.json 路径
-        let compile_commands_path = PathBuf::from(&normalized_output_dir).join("compile_commands.json");
-        json_paths.push(compile_commands_path);
-    }
-
-    if json_paths.is_empty() {
-        eprintln!("Error: No valid compile_commands.json paths could be determined");
-        std::process::exit(1);
-    }
-
-    // 如果没有指定 output_dir，使用第一个 CBP 文件的父目录作为工作区根目录
-    let output_dir = output_dir.unwrap_or_else(|| {
-        // 获取第一个 CBP 文件的父目录（即项目根目录）
-        cbp_paths[0]
+        let json_paths: Vec<PathBuf> = input_paths.into_iter().filter(|p| p.exists()).collect();
+        if json_paths.is_empty() {
+            eprintln!("Error: No valid compile_commands.json files found");
+            std::process::exit(1);
+        }
+        let output_dir = json_paths[0]
             .parent()
             .unwrap_or_else(|| Path::new("."))
-            .to_path_buf()
-    });
+            .to_path_buf();
+        (json_paths, output_dir)
+    } else {
+        // CBP 模式：解析每个 CBP 文件，获取 compile_commands.json 的路径
+        for input_path in &input_paths {
+            match input_path.extension().and_then(|e| e.to_str()) {
+                Some("cbp") => {}
+                Some(ext) => {
+                    eprintln!(
+                        "Error: Expected .cbp file but got '.{}' file: {}",
+                        ext,
+                        input_path.display()
+                    );
+                    std::process::exit(1);
+                }
+                None => {
+                    eprintln!(
+                        "Error: Expected .cbp file but got file without extension: {}",
+                        input_path.display()
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
+        let mut json_paths: Vec<PathBuf> = Vec::new();
+        for cbp_path in &input_paths {
+            if !cbp_path.exists() {
+                eprintln!("Warning: CBP file not found, skipping: {}", cbp_path.display());
+                continue;
+            }
+
+            let xml_content = std::fs::read_to_string(cbp_path)?;
+            let project_info = parse_cbp_file(&xml_content)?;
+
+            let project_dir = cbp_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."));
+
+            let object_output = project_info.targets.first()
+                .map(|t| t.object_output.clone())
+                .unwrap_or_else(|| "./".to_string());
+            let abs_object_output = project_dir.join(&object_output);
+
+            let normalized_output_dir = crate::utils::get_clean_absolute_path(
+                project_dir,
+                Path::new(&abs_object_output),
+            );
+
+            let compile_commands_path = PathBuf::from(&normalized_output_dir).join("compile_commands.json");
+            json_paths.push(compile_commands_path);
+        }
+
+        if json_paths.is_empty() {
+            eprintln!("Error: No valid compile_commands.json paths could be determined");
+            std::process::exit(1);
+        }
+
+        let output_dir = output_dir.unwrap_or_else(|| {
+            input_paths[0]
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .to_path_buf()
+        });
+
+        (json_paths, output_dir)
+    };
 
     Ok(Command::MergeCompileCommands(MergeCompileCommandsArgs {
         json_paths,
@@ -272,11 +319,12 @@ fn parse_convert(
 /// 打印 merge-compile-commands 的使用说明
 fn print_merge_usage(program: &str) {
     eprintln!(
-        "Usage: {} merge-compile-commands <project1.cbp> <project2.cbp> [project3.cbp...] [--output-dir <dir>] [--debug]",
+        "Usage: {} merge-compile-commands [--json] <file1> <file2> [file3...] [--output-dir <dir>] [--debug]",
         program
     );
     eprintln!("Options:");
-    eprintln!("  --output-dir <dir>  Specify workspace root directory for .clangd file");
+    eprintln!("  --json              Treat input files as compile_commands.json directly (not .cbp)");
+    eprintln!("  --output-dir <dir>  Specify workspace root directory for .clangd file (CBP mode only)");
     eprintln!("  --debug             Enable debug logging");
 }
 
@@ -288,11 +336,14 @@ fn print_convert_usage(program: &str) {
     eprintln!();
     eprintln!("Usage:");
     eprintln!("  {} [OPTIONS] <project.cbp> [output_dir]", program);
-    eprintln!("  {} merge-compile-commands <project1.cbp> <project2.cbp> [project3.cbp...] [--output-dir <dir>] [--debug]", program);
+    eprintln!("  {} merge-compile-commands [--json] <file1> <file2> ... [--output-dir <dir>] [--debug]", program);
     eprintln!("  {} --version | -v", program);
     eprintln!();
     eprintln!("Commands:");
-    eprintln!("  merge-compile-commands    Merge multiple compile_commands.json files from CBP projects");
+    eprintln!("  merge-compile-commands [--json] <file1> <file2> ...");
+    eprintln!("                            Merge multiple compile_commands.json files from CBP projects,"
+    );
+    eprintln!("                            or from JSON files directly with --json flag");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  --debug                  Enable debug logging");
