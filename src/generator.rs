@@ -90,6 +90,17 @@ pub fn generate_clangd_config(
         add_flags.push(&inc[..]);
     }
 
+    // 对 clangd 代码分析无用的编译选项（优化、debug、代码生成相关）
+    let skip_add_flags: std::collections::HashSet<&str> = [
+        "-ffunction-sections",
+        "-fdata-sections",
+        "-msave-restore",
+        "-mjump-tables-in-text",
+    ]
+    .iter()
+    .cloned()
+    .collect();
+
     // 添加全局编译选项（包括宏定义）
     debug_println!("[DEBUG generator] Adding global_cflags to Add flags...");
     for flag in &project_info.global_cflags {
@@ -98,9 +109,9 @@ pub fn generate_clangd_config(
             debug_println!("[DEBUG generator] Skipping march flag from global_cflags: {}", flag);
             continue;
         }
-        // 跳过-mjump-tables-in-text选项，因为我们会将其添加到Remove部分
-        if flag == "-mjump-tables-in-text" {
-            debug_println!("[DEBUG generator] Skipping jump-tables flag from global_cflags: {}", flag);
+        // 跳过对 clangd 无用的编译选项
+        if skip_add_flags.contains(flag.as_str()) {
+            debug_println!("[DEBUG generator] Skipping unnecessary flag from global_cflags: {}", flag);
             continue;
         }
         debug_println!("[DEBUG generator] Added global flag: {}", flag);
@@ -115,8 +126,8 @@ pub fn generate_clangd_config(
                 debug_println!("[DEBUG generator] Skipping march flag from target: {}", flag);
                 continue;
             }
-            if flag == "-mjump-tables-in-text" {
-                debug_println!("[DEBUG generator] Skipping jump-tables flag from target: {}", flag);
+            if skip_add_flags.contains(flag.as_str()) {
+                debug_println!("[DEBUG generator] Skipping unnecessary flag from target: {}", flag);
                 continue;
             }
             debug_println!("[DEBUG generator] Added target flag: {}", flag);

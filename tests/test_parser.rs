@@ -448,7 +448,7 @@ fn test_parse_march_info() {
                 <Option output="Output/bin/test.elf" prefix_auto="1" extension_auto="0" />
                 <Option object_output="Output/obj/Debug" />
                 <Compiler>
-                    <Add option="-march=rv32imacxcustom" />
+                    <Add option="-march=rv32imac_xcustom" />
                 </Compiler>
             </Target>
         </Build>
@@ -463,7 +463,7 @@ fn test_parse_march_info() {
     let project_info = result.unwrap();
 
     // 验证march_info被正确处理
-    assert_eq!(project_info.targets[0].march_info.full_march, "-march=rv32imacxcustom");
+    assert_eq!(project_info.targets[0].march_info.full_march, "-march=rv32imac_xcustom");
     assert_eq!(project_info.targets[0].march_info.base_march, Some("-march=rv32imac".to_string()));
     assert!(project_info.targets[0].march_info.has_custom_extension, "应该有自定义扩展");
 
@@ -496,6 +496,83 @@ fn test_parse_march_info() {
     assert_eq!(project_info_no_ext.targets[0].march_info.full_march, "-march=rv32imac");
     assert_eq!(project_info_no_ext.targets[0].march_info.base_march, None);
     assert!(!project_info_no_ext.targets[0].march_info.has_custom_extension, "不应该有自定义扩展");
+}
+
+#[test]
+fn test_parse_march_with_zfinx_and_custom() {
+    // 验证 'x' 在标准扩展名里（如 zfinx）不会误判为自定义扩展
+    // 只有 _x 前缀的才是厂商自定义扩展
+    let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<CodeBlocks_project_file>
+    <FileVersion major="1" minor="6" />
+    <Project>
+        <Option title="TestProject" />
+        <Build>
+            <Target title="Debug">
+                <Option output="Output/bin/test.elf" />
+                <Option object_output="Output/obj/Debug" />
+                <Compiler>
+                    <Add option="-march=rv32imc_zba_zbb_zbc_zbs_zca_zcb_zcmp_zfinx_xbs1" />
+                </Compiler>
+            </Target>
+        </Build>
+        <Unit filename="src/main.c">
+            <Option compile="1" />
+        </Unit>
+    </Project>
+</CodeBlocks_project_file>"#;
+
+    let result = parse_cbp_file(xml_content);
+    assert!(result.is_ok());
+    let project_info = result.unwrap();
+
+    let target = &project_info.targets[0];
+    assert_eq!(target.march_info.full_march, "-march=rv32imc_zba_zbb_zbc_zbs_zca_zcb_zcmp_zfinx_xbs1");
+    assert!(target.march_info.has_custom_extension, "应该有自定义扩展 _xbs1");
+    // zfinx（标准扩展）应保留在 base 中
+    assert_eq!(
+        target.march_info.base_march,
+        Some("-march=rv32imc_zba_zbb_zbc_zbs_zca_zcb_zcmp_zfinx".to_string())
+    );
+}
+
+#[test]
+fn test_parse_global_march_custom_extension() {
+    // -march= 在全局 Compiler 中（而非 target 中），应传播到 target 的 march_info
+    let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<CodeBlocks_project_file>
+    <FileVersion major="1" minor="6" />
+    <Project>
+        <Option title="TestProject" />
+        <Compiler>
+            <Add option="-march=rv32imac_xbs1" />
+            <Add option="-Wall" />
+        </Compiler>
+        <Build>
+            <Target title="Debug">
+                <Option output="Output/bin/test.elf" />
+                <Option object_output="Output/obj/Debug" />
+            </Target>
+        </Build>
+        <Unit filename="src/main.c">
+            <Option compile="1" />
+        </Unit>
+    </Project>
+</CodeBlocks_project_file>"#;
+
+    let result = parse_cbp_file(xml_content);
+    assert!(result.is_ok(), "解析全局 march 失败: {:?}", result.err());
+    let project_info = result.unwrap();
+
+    // 验证全局 march 已传播到 target
+    assert_eq!(project_info.targets.len(), 1);
+    let target = &project_info.targets[0];
+    assert_eq!(target.march_info.full_march, "-march=rv32imac_xbs1");
+    assert!(target.march_info.has_custom_extension, "全局 _xbs1 应被识别为自定义扩展");
+    assert_eq!(target.march_info.base_march, Some("-march=rv32imac".to_string()));
+
+    // 验证 -march= 仍然在 global_cflags 中（compile_commands.json 需要）
+    assert!(project_info.global_cflags.contains(&"-march=rv32imac_xbs1".to_string()));
 }
 
 #[test]

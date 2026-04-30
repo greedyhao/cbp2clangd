@@ -82,6 +82,7 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
     let mut global_linker_libs = Vec::new();
 
     // 解析Project级别Compiler节点
+    let mut global_march_info = crate::models::MarchInfo::default();
     if let Some(compiler_node) = project
         .children()
         .find(|n| n.tag_name().name() == "Compiler")
@@ -92,6 +93,8 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
         {
             if let Some(opt) = add.attribute("option") {
                 global_cflags.push(opt.to_string());
+                // 检测全局 -march= 指令
+                parse_march_flag(&opt, &mut global_march_info);
             }
             if let Some(dir) = add.attribute("directory") {
                 global_include_dirs.push(format!("-I{}", dir));
@@ -164,18 +167,7 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
                         }
 
                         // 检测并解析-march=指令
-                        if opt_str.starts_with("-march=") {
-                            let march_value = opt_str.trim_start_matches("-march=");
-                            target.march_info.full_march = opt_str.clone();
-
-                            if let Some(x_index) = march_value.find('x') {
-                                let base_part = march_value[0..x_index].trim_end_matches('_');
-                                if !base_part.is_empty() {
-                                    target.march_info.base_march = Some(format!("-march={}", base_part));
-                                    target.march_info.has_custom_extension = true;
-                                }
-                            }
-                        }
+                        parse_march_flag(&opt_str, &mut target.march_info);
                     }
                     if let Some(dir) = add.attribute("directory") {
                         target.include_dirs.push(format!("-I{}", dir));
@@ -233,6 +225,19 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
             object_output: "./".to_string(),
             ..Default::default()
         });
+    }
+
+    // 将全局 march_info 传播到未设置 march 的 target
+    if !global_march_info.full_march.is_empty() {
+        for target in &mut targets {
+            if target.march_info.full_march.is_empty() {
+                target.march_info = crate::models::MarchInfo {
+                    full_march: global_march_info.full_march.clone(),
+                    base_march: global_march_info.base_march.clone(),
+                    has_custom_extension: global_march_info.has_custom_extension,
+                };
+            }
+        }
     }
 
     // 对每个编译选项和include路径进行引号处理，防止空格导致命令解析错误
@@ -422,6 +427,24 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
         targets,
         linker_type: "gcc".to_string(),
     })
+}
+
+/// 从编译器 flag 中解析 -march= 指令，填充 MarchInfo
+fn parse_march_flag(flag: &str, march_info: &mut crate::models::MarchInfo) {
+    if !flag.starts_with("-march=") {
+        return;
+    }
+    let march_value = flag.trim_start_matches("-march=");
+    march_info.full_march = flag.to_string();
+
+    // RISC-V 自定义厂商扩展以 _x 为前缀，与标准 _z*/_s* 扩展区分
+    if let Some(x_index) = march_value.find("_x") {
+        let base_part = &march_value[0..x_index];
+        if !base_part.is_empty() {
+            march_info.base_march = Some(format!("-march={}", base_part));
+            march_info.has_custom_extension = true;
+        }
+    }
 }
 
 /// 处理库路径，添加适当的前缀
