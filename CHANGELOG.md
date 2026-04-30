@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-04-30
+### Fixed
+- 修复 RISC-V `-march=` 自定义扩展检测：标准扩展中的 `x`（如 `_zfinx`）不再被误判为自定义扩展
+- 全局（Project/Compiler）`-march=` 配置正确传播到各 Build Target
+
+### Changed
+- `.clangd` 生成时过滤对代码分析无用的编译选项（`-ffunction-sections`、`-fdata-sections`、`-msave-restore`、`-mjump-tables-in-text`）
+
 ## [1.4.0] - 2026-04-29
 ### Added
 - 添加 merge-compile-commands 子命令，支持合并多个 CBP 项目的 compile_commands.json

@@ -143,14 +143,27 @@ XML 内容
 提取 Project 节点
     │
     ├── 提取 Project/Option (title, compiler)
-    ├── 提取 Project/Compiler → global_cflags, global_include_dirs
+    ├── 提取 Project/Compiler → global_cflags, global_include_dirs, global_march_info
     ├── 提取 Project/Linker → global_linker_libs, global_linker_options, global_linker_lib_dirs
     ├── 提取 Build/Target (每个 Target):
     │       ├── Option → output, object_output
-    │       ├── Compiler → cflags, defines, include_dirs, march_info
+    │       ├── Compiler → cflags, defines, include_dirs, march_info (通过 parse_march_flag)
     │       └── Linker → linker_options, linker_libs, linker_lib_dirs
     ├── 提取 Unit (源文件、编译标志)
     └── 提取 ExtraCommands (预/后构建命令)
+    
+    全局 march 传播:
+    └── global_march_info → 填充到未设置 march 的各个 Target
+```
+
+**`parse_march_flag` 解析规则**:
+
+```rust
+fn parse_march_flag(flag: &str, march_info: &mut MarchInfo) {
+    // 仅匹配以 "_x" 开头的自定义厂商扩展
+    // 标准扩展如 _zfinx 中的 'x' 不会被误判
+    if let Some(x_index) = march_value.find("_x") { ... }
+}
 ```
 
 **合并策略**: generator 在生成 build.ninja 和 compile_commands.json 时，会将全局字段（`global_*`）与第一个 target 的字段合并使用。
@@ -179,6 +192,21 @@ XML 内容
 - `generate_clangd_fragment()` - 生成 .clangd 项目片段
 - `merge_clangd_config()` - 合并 .clangd 配置
 - `merge_compile_commands()` - 合并多个 compile_commands.json
+
+**`.clangd` 无用选项过滤**:
+
+`generate_clangd_config()` 在构建 `CompileFlags.Add` 列表时，会跳过对 clangd 代码分析无用的编译选项：
+
+```rust
+let skip_add_flags: HashSet&str> = [
+    "-ffunction-sections",
+    "-fdata-sections",
+    "-msave-restore",
+    "-mjump-tables-in-text",
+].iter().cloned().collect();
+```
+
+这些选项影响链接或代码生成，对静态分析和补全没有帮助，因此不会写入 `.clangd`。
 
 **多 Target 合并策略**:
 
