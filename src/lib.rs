@@ -8,7 +8,7 @@ mod parser;
 mod utils;
 
 // 暴露需要访问的函数
-pub use cb_config::{CbCompilerConfig, CbCompilerEntry, load_cb_compiler_config};
+pub use cb_config::{CbCompilerConfig, CbCompilerEntry, load_cb_compiler_config, find_default_conf, parse_default_conf};
 pub use cli::{parse_args, Command, ConvertArgs, MergeCompileCommandsArgs};
 pub use config::{ToolchainConfig, ToolchainResolveError};
 pub use generator::{

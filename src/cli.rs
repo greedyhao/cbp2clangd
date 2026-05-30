@@ -25,6 +25,8 @@ pub struct MergeCompileCommandsArgs {
 pub enum Command {
     /// 显示版本信息
     ShowVersion,
+    /// 列出系统中 codeblocks 的编译器配置
+    ListCompilers,
     /// 转换 CBP 项目
     Convert(ConvertArgs),
     /// 合并多个 compile_commands.json
@@ -50,6 +52,11 @@ pub fn parse_args() -> Result<Command, Box<dyn std::error::Error>> {
     // 检查是否请求显示版本
     if args.len() == 2 && (args[1] == "--version" || args[1] == "-v") {
         return Ok(Command::ShowVersion);
+    }
+
+    // 检查是否请求列出编译器配置
+    if args.len() == 2 && args[1] == "--list-compilers" {
+        return Ok(Command::ListCompilers);
     }
 
     // 检查是否是 merge-compile-commands 子命令
@@ -337,6 +344,7 @@ fn print_convert_usage(program: &str) {
     eprintln!("Usage:");
     eprintln!("  {} [OPTIONS] <project.cbp> [output_dir]", program);
     eprintln!("  {} merge-compile-commands [--json] <file1> <file2> ... [--output-dir <dir>] [--debug]", program);
+    eprintln!("  {} --list-compilers", program);
     eprintln!("  {} --version | -v", program);
     eprintln!();
     eprintln!("Commands:");
@@ -354,6 +362,7 @@ fn print_convert_usage(program: &str) {
     eprintln!("  --ninja <path>           Specify custom ninja executable path");
     eprintln!("  -n <path>                Short form for --ninja");
     eprintln!("  --output-dir <dir>       Specify workspace root directory (for merge-compile-commands)");
+    eprintln!("  --list-compilers         List available Code::Blocks compiler configurations");
     eprintln!("  --version, -v            Show version information");
     eprintln!("  --help, -h               Show this help message");
 }

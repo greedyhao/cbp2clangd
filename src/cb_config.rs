@@ -7,8 +7,18 @@ use crate::debug_println;
 #[derive(Debug, Clone)]
 pub struct CbCompilerEntry {
     pub compiler_id: String,
+    /// 编译器显示名称 (对应 NAME)
+    pub name: Option<String>,
     /// 工具链安装根路径 (对应 MASTER_PATH)
     pub master_path: Option<String>,
+    /// C 编译器可执行文件 (对应 C_COMPILER)
+    pub c_compiler: Option<String>,
+    /// C++ 编译器可执行文件 (对应 CPP_COMPILER)
+    pub cpp_compiler: Option<String>,
+    /// 链接器可执行文件 (对应 LINKER)
+    pub linker: Option<String>,
+    /// 库管理器可执行文件 (对应 LIB_LINKER)
+    pub lib_linker: Option<String>,
     /// 额外的头文件目录 (对应 INCLUDE_DIRS，分号分隔)
     pub include_dirs: Vec<String>,
     /// 额外的库目录 (对应 LIBRARY_DIRS，分号分隔)
@@ -42,6 +52,8 @@ pub fn find_default_conf() -> Option<PathBuf> {
 
 /// 解析 Code::Blocks default.conf XML 内容
 ///
+/// 同时读取 <sets>（系统预置）和 <user_sets>（用户自定义）下的编译器配置。
+///
 /// XML 结构示例:
 /// ```xml
 /// <CodeBlocksConfig version="1">
@@ -54,6 +66,12 @@ pub fn find_default_conf() -> Option<PathBuf> {
 ///         <INCLUDE_DIRS><str><![CDATA[path1;path2;]]></str></INCLUDE_DIRS>
 ///       </riscv32-v2>
 ///     </sets>
+///     <user_sets>
+///       <riscv32>
+///         <NAME><str><![CDATA[RISC-V 32-bit GCC]]></str></NAME>
+///         <MASTER_PATH><str><![CDATA[...]]></str></MASTER_PATH>
+///       </riscv32>
+///     </user_sets>
 ///   </compiler>
 /// </CodeBlocksConfig>
 /// ```
@@ -71,38 +89,10 @@ pub fn parse_default_conf(xml_content: &str) -> Result<CbCompilerConfig, Box<dyn
         // 提取默认编译器
         default_compiler = extract_str_field(&compiler_node, "DEFAULT_COMPILER");
 
-        // 遍历 <sets> 下的编译器条目
-        if let Some(sets_node) = compiler_node.children().find(|n| n.tag_name().name() == "sets") {
-            for child in sets_node.children() {
-                let tag = child.tag_name().name();
-                // 跳过非编译器条目（如文本节点、set000 等）
-                if tag.is_empty() || child.children().count() == 0 {
-                    continue;
-                }
-                // 跳过 setNNN 格式的占位节点
-                if tag.starts_with("set") && tag[3..].parse::<u32>().is_ok() {
-                    continue;
-                }
-
-                let compiler_id = tag.to_string();
-                let master_path = extract_str_field(&child, "MASTER_PATH");
-                let include_dirs = extract_list_field(&child, "INCLUDE_DIRS");
-                let library_dirs = extract_list_field(&child, "LIBRARY_DIRS");
-
-                debug_println!(
-                    "[DEBUG cb_config] Found compiler: id={}, master_path={:?}",
-                    compiler_id,
-                    master_path
-                );
-
-                compilers.insert(compiler_id.clone(), CbCompilerEntry {
-                    compiler_id,
-                    master_path,
-                    include_dirs,
-                    library_dirs,
-                });
-            }
-        }
+        // 遍历 <sets> 下的编译器条目（系统预置）
+        parse_compiler_sets(&compiler_node, "sets", &mut compilers);
+        // 遍历 <user_sets> 下的编译器条目（用户自定义，覆盖同名条目）
+        parse_compiler_sets(&compiler_node, "user_sets", &mut compilers);
     }
 
     debug_println!(
@@ -115,6 +105,58 @@ pub fn parse_default_conf(xml_content: &str) -> Result<CbCompilerConfig, Box<dyn
         compilers,
         default_compiler,
     })
+}
+
+/// 遍历 <sets> 或 <user_sets> 下的编译器条目并插入到 compilers 字典
+fn parse_compiler_sets(
+    compiler_node: &roxmltree::Node,
+    sets_tag: &str,
+    compilers: &mut HashMap<String, CbCompilerEntry>,
+) {
+    if let Some(sets_node) = compiler_node.children().find(|n| n.tag_name().name() == sets_tag) {
+        for child in sets_node.children() {
+            let tag = child.tag_name().name();
+            // 跳过非编译器条目（如文本节点、set000 等）
+            if tag.is_empty() || child.children().count() == 0 {
+                continue;
+            }
+            // 跳过 setNNN 格式的占位节点
+            if tag.starts_with("set") && tag[3..].parse::<u32>().is_ok() {
+                continue;
+            }
+
+            let compiler_id = tag.to_string();
+            let name = extract_str_field(&child, "NAME");
+            let master_path = extract_str_field(&child, "MASTER_PATH");
+            let c_compiler = extract_str_field(&child, "C_COMPILER");
+            let cpp_compiler = extract_str_field(&child, "CPP_COMPILER");
+            let linker = extract_str_field(&child, "LINKER");
+            let lib_linker = extract_str_field(&child, "LIB_LINKER");
+            let include_dirs = extract_list_field(&child, "INCLUDE_DIRS");
+            let library_dirs = extract_list_field(&child, "LIBRARY_DIRS");
+
+            debug_println!(
+                "[DEBUG cb_config] Found compiler in <{}>: id={}, name={:?}, master_path={:?}",
+                sets_tag,
+                compiler_id,
+                name,
+                master_path
+            );
+
+            // <user_sets> 中的条目会覆盖 <sets> 中的同名条目
+            compilers.insert(compiler_id.clone(), CbCompilerEntry {
+                compiler_id,
+                name,
+                master_path,
+                c_compiler,
+                cpp_compiler,
+                linker,
+                lib_linker,
+                include_dirs,
+                library_dirs,
+            });
+        }
+    }
 }
 
 /// 便捷函数：查找并加载 Code::Blocks 编译器配置
@@ -301,5 +343,67 @@ mod tests {
         // set000 和 set001 应该被跳过
         assert_eq!(config.compilers.len(), 1);
         assert!(config.compilers.contains_key("riscv32-v2"));
+    }
+
+    #[test]
+    fn test_parse_user_sets_overrides_sets() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<CodeBlocksConfig version="1">
+    <compiler>
+        <sets>
+            <riscv32-v2>
+                <MASTER_PATH><str><![CDATA[C:\RV32-V2-sets]]></str></MASTER_PATH>
+            </riscv32-v2>
+        </sets>
+        <user_sets>
+            <riscv32-v2>
+                <MASTER_PATH><str><![CDATA[C:\RV32-V2-user]]></str></MASTER_PATH>
+                <C_COMPILER><str><![CDATA[riscv32-elf-gcc.exe]]></str></C_COMPILER>
+                <CPP_COMPILER><str><![CDATA[riscv32-elf-g++.exe]]></str></CPP_COMPILER>
+                <LINKER><str><![CDATA[riscv32-elf-ld.exe]]></str></LINKER>
+                <LIB_LINKER><str><![CDATA[riscv32-elf-ar.exe]]></str></LIB_LINKER>
+            </riscv32-v2>
+        </user_sets>
+    </compiler>
+</CodeBlocksConfig>"#;
+
+        let config = parse_default_conf(xml).unwrap();
+        assert_eq!(config.compilers.len(), 1);
+        let entry = config.compilers.get("riscv32-v2").unwrap();
+        // user_sets 覆盖 sets
+        assert_eq!(entry.master_path, Some("C:\\RV32-V2-user".to_string()));
+        assert_eq!(entry.c_compiler, Some("riscv32-elf-gcc.exe".to_string()));
+        assert_eq!(entry.cpp_compiler, Some("riscv32-elf-g++.exe".to_string()));
+        assert_eq!(entry.linker, Some("riscv32-elf-ld.exe".to_string()));
+        assert_eq!(entry.lib_linker, Some("riscv32-elf-ar.exe".to_string()));
+    }
+
+    #[test]
+    fn test_parse_user_sets_adds_new_compiler() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<CodeBlocksConfig version="1">
+    <compiler>
+        <sets>
+            <gcc>
+                <MASTER_PATH><str><![CDATA[C:\MinGW]]></str></MASTER_PATH>
+            </gcc>
+        </sets>
+        <user_sets>
+            <riscv32-custom>
+                <NAME><str><![CDATA[Custom RISC-V]]></str></NAME>
+                <MASTER_PATH><str><![CDATA[C:\my_toolchain]]></str></MASTER_PATH>
+                <C_COMPILER><str><![CDATA[riscv32-elf-gcc.exe]]></str></C_COMPILER>
+            </riscv32-custom>
+        </user_sets>
+    </compiler>
+</CodeBlocksConfig>"#;
+
+        let config = parse_default_conf(xml).unwrap();
+        // sets 中 1 个 + user_sets 中 1 个 = 2
+        assert_eq!(config.compilers.len(), 2);
+        assert!(config.compilers.contains_key("gcc"));
+        let custom = config.compilers.get("riscv32-custom").unwrap();
+        assert_eq!(custom.name, Some("Custom RISC-V".to_string()));
+        assert_eq!(custom.c_compiler, Some("riscv32-elf-gcc.exe".to_string()));
     }
 }

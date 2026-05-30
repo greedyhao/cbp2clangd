@@ -5,7 +5,7 @@ use cbp2clangd::{
     Command, ToolchainConfig, ToolchainResolveError, compute_absolute_path, debug_println,
     generate_build_script, generate_compile_commands, generate_ninja_build,
     merge_compile_commands, parse_args, parse_cbp_file, set_debug_mode,
-    load_cb_compiler_config,
+    load_cb_compiler_config, find_default_conf,
     // 引入两个生成函数
     generate_clangd_config, generate_clangd_fragment,
 };
@@ -21,6 +21,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::ShowVersion => {
             println!("cbp2clangd v{}", VERSION);
             Ok(())
+        }
+        Command::ListCompilers => {
+            run_list_compilers()
         }
         Command::Convert(args) => {
             run_convert(args)
@@ -40,6 +43,67 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             merge_compile_commands(&args.json_paths, &workspace_root)?;
             
             Ok(())
+        }
+    }
+}
+
+fn run_list_compilers() -> Result<(), Box<dyn std::error::Error>> {
+    let conf_path = find_default_conf();
+    match conf_path {
+        Some(path) => {
+            println!("Code::Blocks config file: {}", path.display());
+            println!();
+            let content = fs::read_to_string(&path)?;
+            match cbp2clangd::parse_default_conf(&content) {
+                Ok(config) => {
+                    if config.compilers.is_empty() {
+                        println!("No compilers configured.");
+                        return Ok(());
+                    }
+                    println!("Found {} compiler(s):", config.compilers.len());
+                    if let Some(ref default) = config.default_compiler {
+                        println!("Default compiler: {}\n", default);
+                    }
+                    for (id, entry) in &config.compilers {
+                        println!("[{}]", id);
+                        if let Some(ref name) = entry.name {
+                            println!("  NAME:          {}", name);
+                        }
+                        if let Some(ref path) = entry.master_path {
+                            println!("  MASTER_PATH:   {}", path);
+                        }
+                        if let Some(ref cc) = entry.c_compiler {
+                            println!("  C_COMPILER:    {}", cc);
+                        }
+                        if let Some(ref cpp) = entry.cpp_compiler {
+                            println!("  CPP_COMPILER:  {}", cpp);
+                        }
+                        if let Some(ref linker) = entry.linker {
+                            println!("  LINKER:        {}", linker);
+                        }
+                        if let Some(ref lib_linker) = entry.lib_linker {
+                            println!("  LIB_LINKER:    {}", lib_linker);
+                        }
+                        if !entry.include_dirs.is_empty() {
+                            println!("  INCLUDE_DIRS:  {}", entry.include_dirs.join("; "));
+                        }
+                        if !entry.library_dirs.is_empty() {
+                            println!("  LIBRARY_DIRS:  {}", entry.library_dirs.join("; "));
+                        }
+                        println!();
+                    }
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("Error parsing Code::Blocks config: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        None => {
+            eprintln!("Code::Blocks default.conf not found.");
+            eprintln!("Expected at: %APPDATA%/CodeBlocks/default.conf");
+            std::process::exit(1);
         }
     }
 }
