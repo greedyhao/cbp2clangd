@@ -56,6 +56,9 @@ cbp2clangd [--debug] [--test] [--linker <type>] [--ninja <path>] <cbp文件路�
 
 # 合并多个项目的 compile_commands.json
 cbp2clangd merge-compile-commands [--debug] [--output-dir <dir>] <cbp文件1> [cbp文件2] ...
+
+# 列出系统中已安装的编译器配置
+cbp2clangd --list-compilers
 ```
 
 ### 参数说明
@@ -75,6 +78,10 @@ cbp2clangd merge-compile-commands [--debug] [--output-dir <dir>] <cbp文件1> [c
 - `--debug`: 启用调试日志
 - `--output-dir <dir>`: 指定工作区根目录（.clangd 所在目录）
 - `<cbp文件N>`: Code::Blocks 项目文件（.cbp）的路径，将解析其中的 compile_commands.json 路径进行合并
+
+#### 列出编译器配置
+
+- `--list-compilers`: 列出 Code::Blocks 中已注册的所有编译器配置，包括 compiler_id、NAME、MASTER_PATH、C_COMPILER、CPP_COMPILER、LINKER、LIB_LINKER 等字段
 
 ### 查看版本信息
 
@@ -174,14 +181,17 @@ Completion:
 
 对于其他支持 clangd 的编辑器（如 Vim、Emacs、Sublime Text 等），请参考各自的文档进行配置，确保编辑器能够找到生成的 `.clangd` 和 `compile_commands.json` 文件。
 
-## 支持的编译器
+## 编译器配置
 
-工具主要针对中科蓝讯 RISC-V 架构的编译器进行了优化，支持以下编译器 ID：
-- riscv32
-- riscv32-v2
-- riscv32-v3
+工具从 Code::Blocks 的 `default.conf`（`%APPDATA%\CodeBlocks\default.conf`）读取编译器配置，包括安装路径（`MASTER_PATH`）、C/C++ 编译器可执行文件名（`C_COMPILER`/`CPP_COMPILER`）、链接器（`LINKER`）和库管理器（`LIB_LINKER`）。
 
-对于未知的编译器 ID，工具会发出警告并回退到默认设置。
+CBP 项目文件中 `<Option compiler="...">` 的编译器 ID 会与 `default.conf` 中的编译器条目匹配。匹配规则：
+1. 精确匹配 XML 标签名（如 `riscv32_v2`）
+2. 不区分大小写匹配 `<NAME>` 字段（如 `RISCV32-V2`）
+
+如果找不到对应的编译器，工具会报错退出并列出所有可用的编译器 ID。
+
+使用 `--list-compilers` 可查看系统中所有已注册的编译器配置。
 
 ## 常见问题
 
