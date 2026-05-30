@@ -170,7 +170,7 @@ fn parse_merge_compile_commands(
             }
 
             let xml_content = std::fs::read_to_string(cbp_path)?;
-            let project_info = parse_cbp_file(&xml_content)?;
+            let project_info = parse_cbp_file(&xml_content, None)?;
 
             let project_dir = cbp_path
                 .parent()

@@ -144,6 +144,27 @@ fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::
 
     debug_println!("[DEBUG] Workspace Root: {}", workspace_root.display());
 
+    // 加载 Code::Blocks 编译器配置 (用于工具链解析)
+    let cb_config = if args.test_mode {
+        // 测试模式：不需要真实的 default.conf
+        if let Some(config) = load_cb_compiler_config() {
+            debug_println!("[DEBUG] Loaded Code::Blocks compiler config from default.conf");
+            Some(config)
+        } else {
+            None
+        }
+    } else {
+        let config = load_cb_compiler_config();
+        if config.is_some() {
+            debug_println!("[DEBUG] Loaded Code::Blocks compiler config from default.conf");
+        } else {
+            eprintln!("Error: Code::Blocks default.conf not found.");
+            eprintln!("Expected at: %APPDATA%/CodeBlocks/default.conf");
+            return Err("default.conf not found".into());
+        }
+        config
+    };
+
     // 读取 CBP
     let xml_content = if args.test_mode {
         // 内置的测试 XML 内容，包含动态库输出和 Build/Target/Linker/Add directory
@@ -188,7 +209,7 @@ fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::
     };
 
     debug_println!("[DEBUG] Parsing CBP file...");
-    let mut project_info = parse_cbp_file(&xml_content)?;
+    let mut project_info = parse_cbp_file(&xml_content, cb_config.as_ref())?;
 
     // 使用命令行参数中的 linker_type 覆盖解析结果
     project_info.linker_type = args.linker_type;
@@ -199,22 +220,28 @@ fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::
         project_info.compiler_id
     );
 
-    // 加载 Code::Blocks 编译器配置 (如果存在)
-    let cb_config = load_cb_compiler_config();
-    if cb_config.is_some() {
-        debug_println!("[DEBUG] Loaded Code::Blocks compiler config from default.conf");
-    } else {
-        debug_println!("[DEBUG] default.conf not found or unreadable, using hardcoded defaults");
-    }
-
     // 解析工具链配置
-    let toolchain = match ToolchainConfig::resolve_toolchain(&project_info.compiler_id, cb_config.as_ref()) {
-        Ok(config) => config,
-        Err(ToolchainResolveError::UnknownCompiler { compiler_id, available }) => {
-            eprintln!("Error: CBP 文件引用了未知的编译器 '{}'", compiler_id);
-            eprintln!("可用的编译器: {}", available.join(", "));
-            eprintln!("请在 Code::Blocks 中安装该编译器，或检查 CBP 文件的 <Option compiler=\"...\"> 设置");
-            return Err(format!("Unknown compiler: {}", compiler_id).into());
+    let toolchain = match cb_config.as_ref() {
+        Some(config) => match ToolchainConfig::resolve_toolchain(&project_info.compiler_id, config) {
+            Ok(config) => config,
+            Err(ToolchainResolveError::UnknownCompiler { compiler_id, available }) => {
+                eprintln!("Error: CBP 文件引用了未知的编译器 '{}'", compiler_id);
+                eprintln!("可用的编译器: {}", available.join(", "));
+                eprintln!("请在 Code::Blocks 中安装该编译器，或检查 CBP 文件的 <Option compiler=\"...\"> 设置");
+                return Err(format!("Unknown compiler: {}", compiler_id).into());
+            }
+        },
+        None => {
+            // 测试模式或异常情况：没有 default.conf，跳过工具链路径生成
+            debug_println!("[DEBUG] No compiler config available, using placeholder paths");
+            ToolchainConfig {
+                toolchain_base_path: std::env::current_dir()?.to_string_lossy().to_string(),
+                c_compiler: None,
+                cpp_compiler: None,
+                linker: None,
+                lib_linker: None,
+                cb_include_dirs: Vec::new(),
+            }
         }
     };
     debug_println!("[DEBUG] Toolchain config created successfully");

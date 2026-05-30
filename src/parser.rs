@@ -1,3 +1,4 @@
+use crate::cb_config::CbCompilerConfig;
 use crate::ToolchainConfig;
 use crate::models::{BuildTarget, SpecialFileBuildInfo, SourceFileInfo};
 use roxmltree::Document;
@@ -22,7 +23,13 @@ pub struct ProjectInfo {
 }
 
 /// 解析Code::Blocks项目文件
-pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::error::Error>> {
+///
+/// `cb_config` 为可选的 Code::Blocks default.conf 配置，用于解析 ExtraCommands
+/// 中的 `$compiler` 宏替换。为 None 时跳过宏替换。
+pub fn parse_cbp_file(
+    xml_content: &str,
+    cb_config: Option<&CbCompilerConfig>,
+) -> Result<ProjectInfo, Box<dyn std::error::Error>> {
     let doc = Document::parse(xml_content)?;
     let root = doc.root_element();
 
@@ -259,15 +266,12 @@ pub fn parse_cbp_file(xml_content: &str) -> Result<ProjectInfo, Box<dyn std::err
     let options_str = quoted_global_cflags.join(" ");
     let includes_str = quoted_include_dirs.join(" ");
 
-    let toolchain = ToolchainConfig::from_compiler_id(&compiler_id)
-        .unwrap_or_else(|| {
-            // 如果找不到对应的编译器ID，回退到默认值，这里保持与 main.rs 一致的逻辑
-            ToolchainConfig::from_compiler_id("riscv32-v2").unwrap()
-        });
-
-    // 获取编译器的执行路径 (例如: C:\Program Files\...\riscv32-elf-gcc.exe)
-    // 这样生成的 bat 文件中可以直接调用绝对路径，避免依赖 PATH 环境变量
-    let compiler_cmd = format!("\"{}\"", toolchain.compiler_path());
+    // 解析工具链用于 $compiler 宏替换
+    // 如果有 cb_config 则尝试解析，否则使用 compiler_id 作为占位符
+    let compiler_cmd = cb_config
+        .and_then(|config| ToolchainConfig::resolve_toolchain(&compiler_id, config).ok())
+        .map(|tc| format!("\"{}\"", tc.compiler_path()))
+        .unwrap_or_else(|| format!("\"{}\"", compiler_id));
 
     // 定义宏替换闭包
     let replace_cb_macros = |cmd: &str| -> String {
@@ -504,7 +508,7 @@ mod tests {
 
     #[test]
     fn test_parse_basic_project() {
-        let project = parse_cbp_file(TEST_XML).expect("Failed to parse valid XML");
+        let project = parse_cbp_file(TEST_XML, None).expect("Failed to parse valid XML");
 
         // 验证基本信息
         assert_eq!(project.project_name, "TestProject");
@@ -555,7 +559,7 @@ mod tests {
         "#;
 
         // 现在这里应该返回 Ok，而不是 Err
-        let project = parse_cbp_file(xml).expect("Failed to parse project with custom march");
+        let project = parse_cbp_file(xml, None).expect("Failed to parse project with custom march");
 
         // march_info 现在在 target 中
         assert_eq!(project.targets.len(), 1);
@@ -596,7 +600,7 @@ mod tests {
         </CodeBlocks_project_file>
         "#;
 
-        let project = parse_cbp_file(xml).expect("Failed to parse valid XML");
+        let project = parse_cbp_file(xml, None).expect("Failed to parse valid XML");
 
         // 验证 targets
         assert_eq!(project.targets.len(), 1);
@@ -645,7 +649,7 @@ mod tests {
         </CodeBlocks_project_file>
         "#;
 
-        let project = parse_cbp_file(xml).expect("Failed to parse valid XML");
+        let project = parse_cbp_file(xml, None).expect("Failed to parse valid XML");
 
         // 验证基本信息
         assert_eq!(project.project_name, "MultiTargetProject");

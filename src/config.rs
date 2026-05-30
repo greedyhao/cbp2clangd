@@ -33,281 +33,121 @@ impl fmt::Display for ToolchainResolveError {
 
 impl std::error::Error for ToolchainResolveError {}
 
-/// Hardcoded 工具链版本信息 (default.conf 中不包含此信息)
-struct HardcodedToolchainInfo {
-    version_name: String,
-    gcc_version: String,
-}
-
-/// 获取 hardcoded 的版本映射
-fn get_hardcoded_defaults(id: &str) -> Option<HardcodedToolchainInfo> {
-    match id {
-        "riscv32" => Some(HardcodedToolchainInfo {
-            version_name: "V1".to_string(),
-            gcc_version: "6.1.0".to_string(),
-        }),
-        "riscv32-v2" => Some(HardcodedToolchainInfo {
-            version_name: "V2".to_string(),
-            gcc_version: "10.2.0".to_string(),
-        }),
-        "riscv32-v3" => Some(HardcodedToolchainInfo {
-            version_name: "V3".to_string(),
-            gcc_version: "14.2.0".to_string(),
-        }),
-        _ => None,
-    }
-}
-
-/// 获取所有 hardcoded 的编译器 ID 列表
-fn get_hardcoded_ids() -> Vec<String> {
-    vec![
-        "riscv32".to_string(),
-        "riscv32-v2".to_string(),
-        "riscv32-v3".to_string(),
-    ]
-}
-
-/// 从 compiler_id 推导 version_name
-/// 例如 "riscv32-v4" -> "V4"，"riscv32" -> "V1"
-fn derive_version_name(compiler_id: &str) -> String {
-    if let Some(dash_pos) = compiler_id.rfind('-') {
-        let suffix = &compiler_id[dash_pos + 1..];
-        // 如果后缀以 'v' 开头，提取版本号
-        if let Some(stripped) = suffix.strip_prefix('v') {
-            format!("V{}", stripped)
-        } else {
-            format!("V{}", suffix)
-        }
-    } else {
-        "V1".to_string()
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct ToolchainConfig {
-    pub version_name: String,                // e.g., "V2"
-    pub gcc_version: String,                 // e.g., "10.2.0"
-    pub toolchain_base_path: Option<String>, // 自定义工具链基础路径
-    pub cb_include_dirs: Vec<String>,        // 来自 default.conf 的额外 include 路径
+    /// 工具链基础路径（来自 default.conf 的 MASTER_PATH）
+    pub toolchain_base_path: String,
+    /// C 编译器可执行文件名（来自 default.conf 的 C_COMPILER），如 "riscv32-elf-gcc.exe"
+    pub c_compiler: Option<String>,
+    /// C++ 编译器可执行文件名（来自 default.conf 的 CPP_COMPILER）
+    pub cpp_compiler: Option<String>,
+    /// 链接器可执行文件名（来自 default.conf 的 LINKER）
+    pub linker: Option<String>,
+    /// 库管理器可执行文件名（来自 default.conf 的 LIB_LINKER）
+    pub lib_linker: Option<String>,
+    /// 来自 default.conf 的额外 include 路径
+    pub cb_include_dirs: Vec<String>,
 }
 
 impl ToolchainConfig {
-    /// 根据编译器 ID 和可选的 Code::Blocks 配置解析工具链
+    /// 根据编译器 ID 和 Code::Blocks 配置解析工具链
     ///
-    /// 优先使用 default.conf 中的配置，降级到 hardcoded 默认值
-    /// 当编译器 ID 在所有来源中都找不到时返回错误
+    /// 从 default.conf 中查找编译器 ID，提取 MASTER_PATH 和编译工具名。
+    /// 查找顺序：
+    ///   1. 精确匹配 XML 标签名（如 `riscv32_v2`）
+    ///   2. 不区分大小写匹配 `<NAME>` 字段（如 `RISCV32-V2` 匹配条目 `riscv32_v2`）
+    /// 如果找不到对应的编译器，返回错误。
     pub fn resolve_toolchain(
         compiler_id: &str,
-        cb_config: Option<&CbCompilerConfig>,
+        cb_config: &CbCompilerConfig,
     ) -> Result<Self, ToolchainResolveError> {
         debug_println!(
-            "[DEBUG config] Resolving toolchain for compiler ID: {} (cb_config={})",
+            "[DEBUG config] Resolving toolchain for compiler ID: {}",
             compiler_id,
-            cb_config.is_some()
         );
 
-        // 获取 hardcoded 版本信息
-        let hardcoded = get_hardcoded_defaults(compiler_id);
-        let version_name = hardcoded
-            .as_ref()
-            .map(|h| h.version_name.clone())
-            .unwrap_or_else(|| derive_version_name(compiler_id));
-        let gcc_version = hardcoded
-            .as_ref()
-            .map(|h| h.gcc_version.clone())
-            .unwrap_or_else(|| "14.2.0".to_string());
+        // 1. 先尝试精确匹配 XML 标签名
+        let entry = cb_config.compilers.get(compiler_id);
+        // 2. 未命中则遍历所有条目，不区分大小写匹配 NAME 字段
+        let entry = entry.or_else(|| {
+            let compiler_lower = compiler_id.to_lowercase();
+            cb_config.compilers.values().find(|e| {
+                e.name.as_deref().map(|n| n.to_lowercase() == compiler_lower).unwrap_or(false)
+            })
+        });
 
-        // 尝试从 default.conf 获取 master_path
-        let (toolchain_base_path, cb_include_dirs) = if let Some(config) = cb_config {
-            if let Some(entry) = config.compilers.get(compiler_id) {
-                debug_println!(
-                    "[DEBUG config] Found compiler '{}' in default.conf, master_path={:?}",
-                    compiler_id,
-                    entry.master_path
-                );
-                (entry.master_path.clone(), entry.include_dirs.clone())
-            } else {
-                // default.conf 中找不到该编译器
-                debug_println!(
-                    "[DEBUG config] Compiler '{}' not found in default.conf",
-                    compiler_id
-                );
+        let entry = entry.ok_or_else(|| {
+            let mut available: Vec<String> = cb_config.compilers.keys().cloned().collect();
+            available.sort();
+            ToolchainResolveError::UnknownCompiler {
+                compiler_id: compiler_id.to_string(),
+                available,
+            }
+        })?;
 
-                // 如果有 hardcoded 默认值，允许降级使用
-                if hardcoded.is_some() {
-                    debug_println!(
-                        "[DEBUG config] Using hardcoded default path for '{}'",
-                        compiler_id
-                    );
-                    (None, Vec::new())
-                } else {
-                    // 既不在 default.conf 中也没有 hardcoded 默认值 -> 报错
-                    let mut available: Vec<String> = config.compilers.keys().cloned().collect();
-                    available.sort();
-                    return Err(ToolchainResolveError::UnknownCompiler {
-                        compiler_id: compiler_id.to_string(),
-                        available,
-                    });
-                }
+        let toolchain_base_path = entry.master_path.clone().ok_or_else(|| {
+            // default.conf 中有该条目但没有 MASTER_PATH —— 视为配置不完整
+            let mut available: Vec<String> = cb_config.compilers.keys().cloned().collect();
+            available.sort();
+            ToolchainResolveError::UnknownCompiler {
+                compiler_id: compiler_id.to_string(),
+                available,
             }
-        } else {
-            // 没有 default.conf，降级到 hardcoded
-            if hardcoded.is_none() {
-                let available = get_hardcoded_ids();
-                return Err(ToolchainResolveError::UnknownCompiler {
-                    compiler_id: compiler_id.to_string(),
-                    available,
-                });
-            }
-            (None, Vec::new())
-        };
+        })?;
 
         let config = ToolchainConfig {
-            version_name,
-            gcc_version,
             toolchain_base_path,
-            cb_include_dirs,
+            c_compiler: entry.c_compiler.clone(),
+            cpp_compiler: entry.cpp_compiler.clone(),
+            linker: entry.linker.clone(),
+            lib_linker: entry.lib_linker.clone(),
+            cb_include_dirs: entry.include_dirs.clone(),
         };
+
         debug_println!("[DEBUG config] Resolved toolchain: {:?}", config);
         Ok(config)
     }
 
-    /// 旧 API：仅使用 hardcoded 默认值
-    /// 保留向后兼容 (parser.rs 等调用点)
-    pub fn from_compiler_id(id: &str) -> Option<Self> {
-        debug_println!(
-            "[DEBUG config] Creating toolchain config for compiler ID: {}",
-            id
-        );
-        let config = Self::resolve_toolchain(id, None).ok();
-        debug_println!(
-            "[DEBUG config] Toolchain config created: {:?}",
-            config.is_some()
-        );
-        config
-    }
-
     /// 获取工具链基础路径
-    pub fn get_base_path(&self) -> String {
-        debug_println!("[DEBUG config] Getting toolchain base path...");
-        let path = if let Some(custom_path) = &self.toolchain_base_path {
-            debug_println!(
-                "[DEBUG config] Using custom toolchain path: {}",
-                custom_path
-            );
-            custom_path.clone()
-        } else {
-            let default_path = format!(
-                "C:\\Program Files (x86)\\RV32-Toolchain\\RV32-{}",
-                self.version_name
-            );
-            debug_println!(
-                "[DEBUG config] Using default toolchain path: {}",
-                default_path
-            );
-            default_path
-        };
-        debug_println!("[DEBUG config] Final base path: {}", path);
-        path
+    pub fn get_base_path(&self) -> &str {
+        &self.toolchain_base_path
     }
 
+    /// C 编译器完整路径
     pub fn compiler_path(&self) -> String {
-        debug_println!("[DEBUG config] Building compiler path...");
-        let base_path = self.get_base_path();
-        debug_println!("[DEBUG config] Base path: {}", base_path);
-        let compiler_path = format!("{}\\bin\\riscv32-elf-gcc.exe", base_path);
-        debug_println!("[DEBUG config] Final compiler path: {}", compiler_path);
-        debug_println!(
-            "[DEBUG config] Compiler path exists: {}",
-            std::path::Path::new(&compiler_path).exists()
-        );
-        compiler_path
+        let exe = self.c_compiler.as_deref().unwrap_or("gcc.exe");
+        format!("{}\\bin\\{}", self.toolchain_base_path, exe)
     }
 
-    /// 获取链接器路径，根据类型返回gcc或ld
+    /// C++ 编译器完整路径
+    pub fn cpp_compiler_path(&self) -> String {
+        let exe = self.cpp_compiler.as_deref().unwrap_or("g++.exe");
+        format!("{}\\bin\\{}", self.toolchain_base_path, exe)
+    }
+
+    /// 获取链接器路径，根据类型返回 gcc 或 ld
     pub fn linker_path(&self, linker_type: &str) -> String {
-        debug_println!(
-            "[DEBUG config] Building linker path for type: {}",
-            linker_type
-        );
-        let base_path = self.get_base_path();
-        debug_println!("[DEBUG config] Base path: {}", base_path);
-
-        let linker_path = if linker_type == "ld" {
-            format!("{}\\bin\\riscv32-elf-ld.exe", base_path)
+        if linker_type == "ld" {
+            let exe = self.linker.as_deref().unwrap_or("ld.exe");
+            format!("{}\\bin\\{}", self.toolchain_base_path, exe)
         } else {
-            // 默认使用gcc作为链接器
+            // 默认使用 C 编译器作为链接器
             self.compiler_path()
-        };
-
-        debug_println!("[DEBUG config] Final linker path: {}", linker_path);
-        debug_println!(
-            "[DEBUG config] Linker path exists: {}",
-            std::path::Path::new(&linker_path).exists()
-        );
-        linker_path
-    }
-
-    /// 获取ar路径，用于创建静态库
-    pub fn ar_path(&self) -> String {
-        debug_println!("[DEBUG config] Building ar path...");
-        let base_path = self.get_base_path();
-        debug_println!("[DEBUG config] Base path: {}", base_path);
-        let ar_path = format!("{}\\bin\\riscv32-elf-ar.exe", base_path);
-        debug_println!("[DEBUG config] Final ar path: {}", ar_path);
-        debug_println!(
-            "[DEBUG config] Ar path exists: {}",
-            std::path::Path::new(&ar_path).exists()
-        );
-        ar_path
-    }
-
-    pub fn include_paths(&self) -> Vec<String> {
-        debug_println!("[DEBUG config] Building include paths...");
-        let base = self.get_base_path();
-        let gcc_ver = &self.gcc_version;
-        debug_println!("[DEBUG config] Base path: {}", base);
-
-        let mut paths = Vec::new();
-
-        // 工具链标准 include 路径
-        let path1 = format!("{}\\lib\\gcc\\riscv32-elf\\{}\\include", base, gcc_ver);
-        let path2 = format!(
-            "{}\\lib\\gcc\\riscv32-elf\\{}\\include-fixed",
-            base, gcc_ver
-        );
-        let path3 = format!("{}\\riscv32-elf\\include", base);
-
-        debug_println!("[DEBUG config] Include path 1: {}", path1);
-        debug_println!(
-            "[DEBUG config] Include path 1 exists: {}",
-            std::path::Path::new(&path1).exists()
-        );
-        debug_println!("[DEBUG config] Include path 2: {}", path2);
-        debug_println!(
-            "[DEBUG config] Include path 2 exists: {}",
-            std::path::Path::new(&path2).exists()
-        );
-        debug_println!("[DEBUG config] Include path 3: {}", path3);
-        debug_println!(
-            "[DEBUG config] Include path 3 exists: {}",
-            std::path::Path::new(&path3).exists()
-        );
-
-        paths.push(path1);
-        paths.push(path2);
-        paths.push(path3);
-
-        // 追加来自 default.conf 的额外 include 路径
-        for dir in &self.cb_include_dirs {
-            debug_println!("[DEBUG config] CB include dir: {}", dir);
-            paths.push(format!("-I{}", dir));
         }
-
-        paths
     }
 
-    /// 检查编译器路径是否存在
+    /// 获取 ar 路径，用于创建静态库
+    pub fn ar_path(&self) -> String {
+        let exe = self.lib_linker.as_deref().unwrap_or("ar.exe");
+        format!("{}\\bin\\{}", self.toolchain_base_path, exe)
+    }
+
+    /// 返回来自 default.conf 的额外 include 路径（不含 -I 前缀，调用方自行添加）
+    pub fn include_paths(&self) -> &[String] {
+        &self.cb_include_dirs
+    }
+
+    /// 检查编译器是否可用（可执行文件是否存在）
     pub fn is_compiler_available(&self) -> bool {
         let path = self.compiler_path();
         debug_println!(
@@ -326,78 +166,97 @@ mod tests {
     use crate::cb_config::CbCompilerEntry;
     use std::collections::HashMap;
 
-    #[test]
-    fn test_toolchain_version_mapping() {
-        let v2 = ToolchainConfig::from_compiler_id("riscv32-v2").unwrap();
-        assert_eq!(v2.version_name, "V2");
-        assert_eq!(v2.gcc_version, "10.2.0");
-
-        let v3 = ToolchainConfig::from_compiler_id("riscv32-v3").unwrap();
-        assert_eq!(v3.version_name, "V3");
-    }
-
-    #[test]
-    fn test_invalid_compiler_id() {
-        let invalid = ToolchainConfig::from_compiler_id("unknown-compiler");
-        assert!(invalid.is_none());
-    }
-
-    #[test]
-    fn test_path_generation() {
-        let config = ToolchainConfig {
-            version_name: "TestVer".to_string(),
-            gcc_version: "1.0.0".to_string(),
-            toolchain_base_path: Some("C:\\CustomToolchain".to_string()),
-            cb_include_dirs: Vec::new(),
-        };
-
-        // 测试自定义路径
-        assert_eq!(config.compiler_path(), "C:\\CustomToolchain\\bin\\riscv32-elf-gcc.exe");
-        assert_eq!(config.ar_path(), "C:\\CustomToolchain\\bin\\riscv32-elf-ar.exe");
-
-        // 测试 Linker 逻辑 (gcc vs ld)
-        assert!(config.linker_path("gcc").ends_with("gcc.exe"));
-        assert!(config.linker_path("ld").ends_with("ld.exe"));
+    fn make_cb_config(entries: Vec<(&str, &str, Option<&str>, Option<&str>, Option<&str>, Option<&str>)>) -> CbCompilerConfig {
+        let mut compilers = HashMap::new();
+        for (id, master_path, c_compiler, cpp_compiler, linker, lib_linker) in entries {
+            compilers.insert(
+                id.to_string(),
+                CbCompilerEntry {
+                    compiler_id: id.to_string(),
+                    name: None,
+                    master_path: Some(master_path.to_string()),
+                    c_compiler: c_compiler.map(|s| s.to_string()),
+                    cpp_compiler: cpp_compiler.map(|s| s.to_string()),
+                    linker: linker.map(|s| s.to_string()),
+                    lib_linker: lib_linker.map(|s| s.to_string()),
+                    include_dirs: Vec::new(),
+                    library_dirs: Vec::new(),
+                },
+            );
+        }
+        CbCompilerConfig {
+            compilers,
+            default_compiler: None,
+        }
     }
 
     #[test]
     fn test_resolve_toolchain_from_cb_config() {
-        let mut compilers = HashMap::new();
-        compilers.insert(
-            "riscv32-v2".to_string(),
-            CbCompilerEntry {
-                compiler_id: "riscv32-v2".to_string(),
-                name: None,
-                master_path: Some("D:\\CustomToolchain".to_string()),
-                c_compiler: None,
-                cpp_compiler: None,
-                linker: None,
-                lib_linker: None,
-                include_dirs: vec!["D:\\extra\\include".to_string()],
-                library_dirs: Vec::new(),
-            },
-        );
-        let cb_config = CbCompilerConfig {
-            compilers,
-            default_compiler: None,
-        };
+        let cb_config = make_cb_config(vec![
+            ("riscv32-v2", "D:\\CustomToolchain", Some("riscv32-elf-gcc.exe"), None, None, None),
+        ]);
 
-        let toolchain =
-            ToolchainConfig::resolve_toolchain("riscv32-v2", Some(&cb_config)).unwrap();
-        assert_eq!(toolchain.toolchain_base_path, Some("D:\\CustomToolchain".to_string()));
-        assert_eq!(toolchain.cb_include_dirs, vec!["D:\\extra\\include"]);
-        assert_eq!(toolchain.compiler_path(), "D:\\CustomToolchain\\bin\\riscv32-elf-gcc.exe");
+        let toolchain = ToolchainConfig::resolve_toolchain("riscv32-v2", &cb_config).unwrap();
+        assert_eq!(toolchain.toolchain_base_path, "D:\\CustomToolchain");
+        assert_eq!(
+            toolchain.compiler_path(),
+            "D:\\CustomToolchain\\bin\\riscv32-elf-gcc.exe"
+        );
+        assert_eq!(
+            toolchain.cpp_compiler_path(),
+            "D:\\CustomToolchain\\bin\\g++.exe"
+        ); // 默认
+        assert_eq!(toolchain.linker_path("gcc"), toolchain.compiler_path());
+        assert_eq!(
+            toolchain.linker_path("ld"),
+            "D:\\CustomToolchain\\bin\\ld.exe"
+        ); // 默认 ld
+        assert_eq!(
+            toolchain.ar_path(),
+            "D:\\CustomToolchain\\bin\\ar.exe"
+        ); // 默认 ar
     }
 
     #[test]
-    fn test_resolve_toolchain_unknown_with_cb_config() {
+    fn test_resolve_toolchain_with_all_fields() {
+        let cb_config = make_cb_config(vec![
+            ("mygcc", "C:\\MyToolchain",
+                Some("gcc.exe"), Some("g++.exe"), Some("ld.exe"), Some("ar.exe")),
+        ]);
+
+        let toolchain = ToolchainConfig::resolve_toolchain("mygcc", &cb_config).unwrap();
+        assert_eq!(toolchain.compiler_path(), "C:\\MyToolchain\\bin\\gcc.exe");
+        assert_eq!(toolchain.cpp_compiler_path(), "C:\\MyToolchain\\bin\\g++.exe");
+        assert_eq!(toolchain.linker_path("ld"), "C:\\MyToolchain\\bin\\ld.exe");
+        assert_eq!(toolchain.ar_path(), "C:\\MyToolchain\\bin\\ar.exe");
+        assert_eq!(toolchain.get_base_path(), "C:\\MyToolchain");
+    }
+
+    #[test]
+    fn test_resolve_toolchain_unknown_compiler() {
+        let cb_config = make_cb_config(vec![
+            ("riscv32-v2", "D:\\V2", None, None, None, None),
+        ]);
+
+        let result = ToolchainConfig::resolve_toolchain("unknown-compiler", &cb_config);
+        assert!(result.is_err());
+        if let Err(ToolchainResolveError::UnknownCompiler { compiler_id, available }) = result {
+            assert_eq!(compiler_id, "unknown-compiler");
+            assert!(available.contains(&"riscv32-v2".to_string()));
+        } else {
+            panic!("Expected UnknownCompiler error");
+        }
+    }
+
+    #[test]
+    fn test_resolve_toolchain_missing_master_path() {
         let mut compilers = HashMap::new();
         compilers.insert(
-            "riscv32-v2".to_string(),
+            "broken".to_string(),
             CbCompilerEntry {
-                compiler_id: "riscv32-v2".to_string(),
+                compiler_id: "broken".to_string(),
                 name: None,
-                master_path: Some("D:\\V2".to_string()),
+                master_path: None,
                 c_compiler: None,
                 cpp_compiler: None,
                 linker: None,
@@ -411,60 +270,128 @@ mod tests {
             default_compiler: None,
         };
 
-        let result = ToolchainConfig::resolve_toolchain("unknown-compiler", Some(&cb_config));
+        let result = ToolchainConfig::resolve_toolchain("broken", &cb_config);
         assert!(result.is_err());
-        if let Err(ToolchainResolveError::UnknownCompiler { compiler_id, available }) = result {
-            assert_eq!(compiler_id, "unknown-compiler");
-            assert!(available.contains(&"riscv32-v2".to_string()));
-        } else {
-            panic!("Expected UnknownCompiler error");
-        }
     }
 
     #[test]
-    fn test_resolve_toolchain_fallback_when_no_cb_config() {
-        // 没有 cb_config 时应使用 hardcoded 默认值
-        let toolchain = ToolchainConfig::resolve_toolchain("riscv32-v2", None).unwrap();
-        assert_eq!(toolchain.version_name, "V2");
-        assert_eq!(toolchain.gcc_version, "10.2.0");
-        assert!(toolchain.toolchain_base_path.is_none());
+    fn test_default_compiler_fallback_names() {
+        let cb_config = make_cb_config(vec![
+            ("gcc", "C:\\MinGW", None, None, None, None),
+        ]);
+
+        let toolchain = ToolchainConfig::resolve_toolchain("gcc", &cb_config).unwrap();
+        // C_COMPILER 未设置 → 默认 gcc.exe
+        assert_eq!(toolchain.compiler_path(), "C:\\MinGW\\bin\\gcc.exe");
+        // LIB_LINKER 未设置 → 默认 ar.exe
+        assert_eq!(toolchain.ar_path(), "C:\\MinGW\\bin\\ar.exe");
+        // LINKER 未设置且 linker_type=ld → 默认 ld.exe
+        assert_eq!(toolchain.linker_path("ld"), "C:\\MinGW\\bin\\ld.exe");
+        // linker_type=gcc → 使用 compiler_path
+        assert_eq!(toolchain.linker_path("gcc"), toolchain.compiler_path());
     }
 
     #[test]
-    fn test_resolve_toolchain_hardcoded_id_not_in_cb_config() {
-        // hardcoded ID 不在 cb_config 中，但有 hardcoded 默认值 -> 降级成功
+    fn test_compiler_availability() {
+        let cb_config = make_cb_config(vec![
+            ("exists", "C:\\DoesNotExist", Some("nonexistent.exe"), None, None, None),
+        ]);
+
+        let toolchain = ToolchainConfig::resolve_toolchain("exists", &cb_config).unwrap();
+        // 路径肯定不存在
+        assert!(!toolchain.is_compiler_available());
+    }
+
+    #[test]
+    fn test_include_paths() {
+        let mut compilers = HashMap::new();
+        compilers.insert(
+            "test".to_string(),
+            CbCompilerEntry {
+                compiler_id: "test".to_string(),
+                name: None,
+                master_path: Some("C:\\Toolchain".to_string()),
+                c_compiler: None,
+                cpp_compiler: None,
+                linker: None,
+                lib_linker: None,
+                include_dirs: vec!["C:\\inc1".to_string(), "C:\\inc2".to_string()],
+                library_dirs: Vec::new(),
+            },
+        );
         let cb_config = CbCompilerConfig {
-            compilers: HashMap::new(),
+            compilers,
             default_compiler: None,
         };
 
-        let toolchain =
-            ToolchainConfig::resolve_toolchain("riscv32-v2", Some(&cb_config)).unwrap();
-        assert_eq!(toolchain.version_name, "V2");
-        assert!(toolchain.toolchain_base_path.is_none()); // 降级到 hardcoded 默认路径
+        let toolchain = ToolchainConfig::resolve_toolchain("test", &cb_config).unwrap();
+        let paths = toolchain.include_paths();
+        assert_eq!(paths.len(), 2);
+        assert!(paths.contains(&"C:\\inc1".to_string()));
+        assert!(paths.contains(&"C:\\inc2".to_string()));
     }
 
     #[test]
-    fn test_cb_include_dirs_appended() {
-        let config = ToolchainConfig {
-            version_name: "TestVer".to_string(),
-            gcc_version: "1.0.0".to_string(),
-            toolchain_base_path: Some("C:\\CustomToolchain".to_string()),
-            cb_include_dirs: vec!["D:\\extra1".to_string(), "D:\\extra2".to_string()],
+    fn test_resolve_by_name_case_insensitive() {
+        // XML 标签是 riscv32_v2，但 NAME 是 RISCV32-V2
+        // CBP 文件中 <Option compiler="RISCV32-V2"/> 应该匹配
+        let mut compilers = HashMap::new();
+        compilers.insert(
+            "riscv32_v2".to_string(),
+            CbCompilerEntry {
+                compiler_id: "riscv32_v2".to_string(),
+                name: Some("RISCV32-V2".to_string()),
+                master_path: Some("C:\\RV32-V2".to_string()),
+                c_compiler: None,
+                cpp_compiler: None,
+                linker: None,
+                lib_linker: None,
+                include_dirs: Vec::new(),
+                library_dirs: Vec::new(),
+            },
+        );
+        let cb_config = CbCompilerConfig {
+            compilers,
+            default_compiler: None,
         };
 
-        let paths = config.include_paths();
-        // 标准路径 + CB 额外路径
-        assert!(paths.len() >= 5);
-        assert!(paths.iter().any(|p| p == "-ID:\\extra1"));
-        assert!(paths.iter().any(|p| p == "-ID:\\extra2"));
+        // 应该通过 NAME 不区分大小写匹配到 riscv32_v2
+        let toolchain = ToolchainConfig::resolve_toolchain("RISCV32-V2", &cb_config).unwrap();
+        assert_eq!(toolchain.toolchain_base_path, "C:\\RV32-V2");
+
+        // 小写也应该匹配
+        let toolchain = ToolchainConfig::resolve_toolchain("riscv32-v2", &cb_config).unwrap();
+        assert_eq!(toolchain.toolchain_base_path, "C:\\RV32-V2");
+
+        // 大小写混写也应该匹配
+        let toolchain = ToolchainConfig::resolve_toolchain("Riscv32-V2", &cb_config).unwrap();
+        assert_eq!(toolchain.toolchain_base_path, "C:\\RV32-V2");
     }
 
     #[test]
-    fn test_derive_version_name() {
-        assert_eq!(derive_version_name("riscv32-v4"), "V4");
-        assert_eq!(derive_version_name("riscv32-v10"), "V10");
-        assert_eq!(derive_version_name("riscv32"), "V1");
-        assert_eq!(derive_version_name("riscv32-custom"), "Vcustom");
+    fn test_resolve_by_tag_name_still_works() {
+        // XML 标签名直接匹配仍然优先
+        let mut compilers = HashMap::new();
+        compilers.insert(
+            "riscv32".to_string(),
+            CbCompilerEntry {
+                compiler_id: "riscv32".to_string(),
+                name: None,  // 没有 NAME
+                master_path: Some("C:\\RV32".to_string()),
+                c_compiler: None,
+                cpp_compiler: None,
+                linker: None,
+                lib_linker: None,
+                include_dirs: Vec::new(),
+                library_dirs: Vec::new(),
+            },
+        );
+        let cb_config = CbCompilerConfig {
+            compilers,
+            default_compiler: None,
+        };
+
+        let toolchain = ToolchainConfig::resolve_toolchain("riscv32", &cb_config).unwrap();
+        assert_eq!(toolchain.toolchain_base_path, "C:\\RV32");
     }
 }

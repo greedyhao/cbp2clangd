@@ -309,7 +309,10 @@ pub fn generate_compile_commands(
             "[WARNING generator] Compiler path {} does not exist. Using placeholder.",
             compiler_path
         );
-        "riscv32-elf-gcc".to_string()
+        std::path::Path::new(&compiler_path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "gcc".to_string())
     };
     debug_println!("[DEBUG generator] Final compiler path to use: {}", compiler);
 
@@ -573,7 +576,10 @@ pub fn generate_ninja_build(
         }
     } else {
         println!("[WARNING generator] Compiler path {} does not exist. Using placeholder.", compiler_path);
-        "riscv32-elf-gcc".to_string()
+        std::path::Path::new(&compiler_path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "gcc".to_string())
     };
 
     // 获取链接器路径
@@ -589,11 +595,16 @@ pub fn generate_ninja_build(
         }
     } else {
         println!("[WARNING generator] Linker path {} does not exist. Using placeholder.", linker_path);
-        if project_info.linker_type == "ld" {
-            "riscv32-elf-ld".to_string()
-        } else {
-            "riscv32-elf-gcc".to_string()
-        }
+        std::path::Path::new(&linker_path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| {
+                if project_info.linker_type == "ld" {
+                    "ld".to_string()
+                } else {
+                    "gcc".to_string()
+                }
+            })
     };
 
     // 提前计算常用的标准化路径，避免重复计算
@@ -868,7 +879,10 @@ pub fn generate_ninja_build(
             }
         } else {
             println!("[WARNING generator] Ar path {} does not exist. Using placeholder.", ar_path);
-            "riscv32-elf-ar".to_string()
+            std::path::Path::new(&ar_path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "ar".to_string())
         };
 
         ninja_content.push_str("rule ar\n");
@@ -1011,9 +1025,14 @@ fn find_compiler_position(command: &str, compiler: &str) -> Option<usize> {
     }
 
     // 如果精确匹配失败，尝试匹配编译器名称（如 gcc, g++, clang 等）
+    // 从编译器路径中提取可执行文件基本名（去掉目录和 .exe）
+    let compiler_stem = Path::new(compiler)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
     let compiler_variants = [
         "gcc", "g++", "clang", "clang++",
-        &compiler.replace("riscv32-elf-", "")
+        &compiler_stem[..],
     ];
 
     for variant in &compiler_variants {
@@ -1579,31 +1598,33 @@ mod tests {
 
     #[test]
     fn test_find_compiler_position() {
-        // 测试编译器位置查找
-        let cmd = "riscv32-elf-gcc -I/path/to/include -c source.c -o object.o";
-        let pos = find_compiler_position(cmd, "riscv32-elf-gcc");
+        // 测试编译器位置查找 — 精确匹配完整路径
+        let cmd = "C:\\Toolchain\\bin\\gcc.exe -I/path/to/include -c source.c -o object.o";
+        let pos = find_compiler_position(cmd, "C:\\Toolchain\\bin\\gcc.exe");
         assert_eq!(pos, Some(0));
 
+        // 应回退到匹配 "gcc"
         let cmd = "gcc -I/path/to/include -c source.c -o object.o";
-        let pos = find_compiler_position(cmd, "riscv32-elf-gcc");
-        assert_eq!(pos, Some(0)); // Should match "gcc" as a compiler variant
+        let pos = find_compiler_position(cmd, "C:\\Toolchain\\bin\\gcc.exe");
+        assert_eq!(pos, Some(0));
 
+        // 应回退到匹配 "clang++"
         let cmd = "clang++ -std=c++11 -c main.cpp -o main.o";
-        let pos = find_compiler_position(cmd, "riscv32-elf-gcc");
-        assert_eq!(pos, Some(0)); // Should match "clang++" as a compiler variant
+        let pos = find_compiler_position(cmd, "C:\\Toolchain\\bin\\gcc.exe");
+        assert_eq!(pos, Some(0));
     }
 
     #[test]
     fn test_insert_dependency_flags() {
         // 测试插入依赖标志
-        let cmd = "riscv32-elf-gcc -I/path/to/include -c source.c -o obj.o";
-        let result = insert_dependency_flags(cmd.to_string(), "riscv32-elf-gcc");
+        let cmd = "C:\\Toolchain\\bin\\gcc.exe -I/path/to/include -c source.c -o obj.o";
+        let result = insert_dependency_flags(cmd.to_string(), "C:\\Toolchain\\bin\\gcc.exe");
         assert!(result.contains("-MMD -MF $out.d"));
         assert!(result.contains("-c"));
 
         // 测试没有 -c 标志的命令
-        let cmd = "riscv32-elf-gcc -I/path/to/include source.c -o obj.o";
-        let result = insert_dependency_flags(cmd.to_string(), "riscv32-elf-gcc");
+        let cmd = "C:\\Toolchain\\bin\\gcc.exe -I/path/to/include source.c -o obj.o";
+        let result = insert_dependency_flags(cmd.to_string(), "C:\\Toolchain\\bin\\gcc.exe");
         assert!(result.contains("-MMD -MF $out.d"));
         assert!(result.contains("-c"));
     }
@@ -1648,7 +1669,14 @@ mod tests {
             linker_type: "gcc".to_string(),
         };
 
-        let toolchain = crate::ToolchainConfig::from_compiler_id("riscv32-v2").unwrap();
+        let toolchain = crate::ToolchainConfig {
+            toolchain_base_path: "C:\\Toolchain".to_string(),
+            c_compiler: Some("gcc.exe".to_string()),
+            cpp_compiler: None,
+            linker: None,
+            lib_linker: None,
+            cb_include_dirs: Vec::new(),
+        };
         let project_dir = std::path::PathBuf::from(".");
 
         // 生成 Ninja 内容

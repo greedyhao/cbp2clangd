@@ -1,6 +1,18 @@
 use cbp2clangd::{ToolchainConfig, generate_ninja_build, parse_cbp_file};
 use std::path::Path;
 
+/// 为测试创建一个通用的 ToolchainConfig
+fn test_toolchain() -> ToolchainConfig {
+    ToolchainConfig {
+        toolchain_base_path: "C:\\Toolchain".to_string(),
+        c_compiler: Some("gcc.exe".to_string()),
+        cpp_compiler: None,
+        linker: None,
+        lib_linker: None,
+        cb_include_dirs: Vec::new(),
+    }
+}
+
 #[test]
 fn test_generate_ninja_build_for_static_lib() {
     // 创建一个简单的XML内容，包含静态库输出
@@ -31,8 +43,8 @@ fn test_generate_ninja_build_for_static_lib() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let project_info = parse_cbp_file(xml_content).unwrap();
-    let toolchain = ToolchainConfig::from_compiler_id("riscv32-v2").unwrap();
+    let project_info = parse_cbp_file(xml_content, None).unwrap();
+    let toolchain = test_toolchain();
 
     let result = generate_ninja_build(&project_info, Path::new("."), &toolchain);
     assert!(result.is_ok());
@@ -77,8 +89,8 @@ fn test_generate_ninja_build_for_executable() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let project_info = parse_cbp_file(xml_content).unwrap();
-    let toolchain = ToolchainConfig::from_compiler_id("riscv32-v2").unwrap();
+    let project_info = parse_cbp_file(xml_content, None).unwrap();
+    let toolchain = test_toolchain();
 
     let result = generate_ninja_build(&project_info, Path::new("."), &toolchain);
     assert!(result.is_ok());
@@ -118,8 +130,8 @@ fn test_generate_ninja_build_with_target_macros() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let project_info = parse_cbp_file(xml_content).unwrap();
-    let toolchain = ToolchainConfig::from_compiler_id("riscv32-v2").unwrap();
+    let project_info = parse_cbp_file(xml_content, None).unwrap();
+    let toolchain = test_toolchain();
 
     let result = generate_ninja_build(&project_info, Path::new("."), &toolchain);
     assert!(result.is_ok());
@@ -176,8 +188,8 @@ fn test_target_output_dir_path_separator() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let project_info = parse_cbp_file(xml_content).unwrap();
-    let toolchain = ToolchainConfig::from_compiler_id("riscv32-v2").unwrap();
+    let project_info = parse_cbp_file(xml_content, None).unwrap();
+    let toolchain = test_toolchain();
 
     let result = generate_ninja_build(&project_info, Path::new("."), &toolchain);
     assert!(result.is_ok());
@@ -187,14 +199,12 @@ fn test_target_output_dir_path_separator() {
     println!("Generated ninja content for path separator test:\n{}", ninja_content);
 
     // 检查 TARGET_OUTPUT_DIR 变量是否被正确替换，并且路径包含分隔符
-    // 确保输出路径是 "Output\\bin\\app.rv32" 而不是 "Output\\binapp.rv32"
     assert!(
         ninja_content.contains(r"Output\bin\app.rv32"),
         "TARGET_OUTPUT_DIR 应该被正确替换，路径应该包含分隔符"
     );
 
     // 检查 TARGET_OBJECT_DIR 变量是否被正确替换，并且路径包含分隔符
-    // 确保对象路径是 "obj\\Debug\\" 而不是 "obj\\Debug"（如果在特殊命令中使用的话）
     assert!(
         ninja_content.contains(r"obj\Debug\"),
         "TARGET_OBJECT_DIR 应该被正确替换，路径应该包含分隔符"
@@ -227,8 +237,8 @@ fn test_special_files_as_implicit_deps() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let project_info = parse_cbp_file(xml_content).unwrap();
-    let toolchain = ToolchainConfig::from_compiler_id("riscv32-v2").unwrap();
+    let project_info = parse_cbp_file(xml_content, None).unwrap();
+    let toolchain = test_toolchain();
 
     let result = generate_ninja_build(&project_info, Path::new("."), &toolchain);
     assert!(result.is_ok());

@@ -30,7 +30,7 @@ fn test_parse_cbp_file() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok());
     let project_info = result.unwrap();
     assert_eq!(project_info.project_name, "libchatbot");
@@ -84,7 +84,7 @@ fn test_parse_unit_compile_link_attributes() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
@@ -141,7 +141,7 @@ fn test_parse_special_files_compile_default() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
@@ -177,7 +177,7 @@ fn test_parse_target_compiler_macros() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
@@ -233,7 +233,7 @@ fn test_parse_target_linker_add_directory() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
@@ -279,7 +279,7 @@ fn test_parse_extra_commands() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
@@ -292,7 +292,7 @@ fn test_parse_extra_commands() {
 
     // 验证第一个预构建命令是否包含预期内容
     let first_command = &project_info.prebuild_commands[0];
-    assert!(first_command.contains("riscv32-elf-gcc"), "第一个命令应该包含编译器路径");
+    assert!(first_command.contains("riscv32-v2"), "第一个命令应该包含编译器 ID 占位符");
     assert!(first_command.contains("-Wall -g"), "第一个命令应该包含编译选项");
     assert!(first_command.contains(".\\output\\bin\\copy_tone.xm"), "第一个命令应该包含替换后的项目目录路径");
     assert!(first_command.contains(".\\output\\bin\\copy_tone.bat"), "第一个命令应该包含替换后的项目目录路径");
@@ -326,7 +326,7 @@ fn test_parse_unit_compile_0() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
@@ -370,7 +370,7 @@ fn test_parse_special_files() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
@@ -415,7 +415,7 @@ fn test_parse_special_files_without_build_command() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
@@ -458,7 +458,7 @@ fn test_parse_march_info() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
@@ -488,7 +488,7 @@ fn test_parse_march_info() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result_no_ext = parse_cbp_file(xml_content_no_ext);
+    let result_no_ext = parse_cbp_file(xml_content_no_ext, None);
     assert!(result_no_ext.is_ok());
     let project_info_no_ext = result_no_ext.unwrap();
 
@@ -522,7 +522,7 @@ fn test_parse_march_with_zfinx_and_custom() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
@@ -560,7 +560,7 @@ fn test_parse_global_march_custom_extension() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok(), "解析全局 march 失败: {:?}", result.err());
     let project_info = result.unwrap();
 
@@ -602,7 +602,7 @@ fn test_parse_include_dirs() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
@@ -644,7 +644,7 @@ fn test_parse_linker_options() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
@@ -680,7 +680,7 @@ fn test_parse_project_linker_add_directory() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
@@ -744,7 +744,7 @@ fn test_parse_multiple_build_targets() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
@@ -804,7 +804,7 @@ fn test_parse_library_with_path() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
@@ -866,7 +866,7 @@ fn test_parse_different_source_file_types() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
@@ -904,7 +904,7 @@ fn test_parse_default_output_attributes() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
@@ -933,7 +933,7 @@ fn test_parse_missing_object_output() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
@@ -962,7 +962,7 @@ fn test_parse_missing_output() {
     </Project>
 </CodeBlocks_project_file>"#;
 
-    let result = parse_cbp_file(xml_content);
+    let result = parse_cbp_file(xml_content, None);
     assert!(result.is_ok());
     let project_info = result.unwrap();
 
