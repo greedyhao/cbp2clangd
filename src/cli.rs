@@ -139,7 +139,10 @@ fn parse_merge_compile_commands(
         // --json 模式：路径直接就是 compile_commands.json 文件
         for json_path in &input_paths {
             if !json_path.exists() {
-                eprintln!("Warning: JSON file not found, skipping: {}", json_path.display());
+                eprintln!(
+                    "Warning: JSON file not found, skipping: {}",
+                    json_path.display()
+                );
             }
         }
         let json_paths: Vec<PathBuf> = input_paths.into_iter().filter(|p| p.exists()).collect();
@@ -177,28 +180,30 @@ fn parse_merge_compile_commands(
         let mut json_paths: Vec<PathBuf> = Vec::new();
         for cbp_path in &input_paths {
             if !cbp_path.exists() {
-                eprintln!("Warning: CBP file not found, skipping: {}", cbp_path.display());
+                eprintln!(
+                    "Warning: CBP file not found, skipping: {}",
+                    cbp_path.display()
+                );
                 continue;
             }
 
             let xml_content = std::fs::read_to_string(cbp_path)?;
             let project_info = parse_cbp_file(&xml_content, None)?;
 
-            let project_dir = cbp_path
-                .parent()
-                .unwrap_or_else(|| Path::new("."));
+            let project_dir = cbp_path.parent().unwrap_or_else(|| Path::new("."));
 
-            let object_output = project_info.targets.first()
+            let object_output = project_info
+                .targets
+                .first()
                 .map(|t| t.object_output.clone())
                 .unwrap_or_else(|| "./".to_string());
             let abs_object_output = project_dir.join(&object_output);
 
-            let normalized_output_dir = crate::utils::get_clean_absolute_path(
-                project_dir,
-                Path::new(&abs_object_output),
-            );
+            let normalized_output_dir =
+                crate::utils::get_clean_absolute_path(project_dir, Path::new(&abs_object_output));
 
-            let compile_commands_path = PathBuf::from(&normalized_output_dir).join("compile_commands.json");
+            let compile_commands_path =
+                PathBuf::from(&normalized_output_dir).join("compile_commands.json");
             json_paths.push(compile_commands_path);
         }
 
@@ -225,9 +230,7 @@ fn parse_merge_compile_commands(
 }
 
 /// 解析 apply-config 子命令
-fn parse_apply_config(
-    mut args: Vec<String>,
-) -> Result<Command, Box<dyn std::error::Error>> {
+fn parse_apply_config(mut args: Vec<String>) -> Result<Command, Box<dyn std::error::Error>> {
     let program_name = args[0].clone();
 
     // 移除子命令名（索引 1）
@@ -277,7 +280,7 @@ fn parse_convert(
     debug: bool,
 ) -> Result<Command, Box<dyn std::error::Error>> {
     let program_name = args[0].clone();
-    
+
     // 检查是否是测试模式
     let is_test_mode = args.iter().any(|arg| arg == "--test");
     if let Some(pos) = args.iter().position(|arg| arg == "--test") {
@@ -389,8 +392,12 @@ fn print_merge_usage(program: &str) {
         program
     );
     eprintln!("Options:");
-    eprintln!("  --json              Treat input files as compile_commands.json directly (not .cbp)");
-    eprintln!("  --output-dir <dir>  Specify workspace root directory for .clangd file (CBP mode only)");
+    eprintln!(
+        "  --json              Treat input files as compile_commands.json directly (not .cbp)"
+    );
+    eprintln!(
+        "  --output-dir <dir>  Specify workspace root directory for .clangd file (CBP mode only)"
+    );
     eprintln!("  --debug             Enable debug logging");
 }
 
@@ -402,18 +409,24 @@ fn print_convert_usage(program: &str) {
     eprintln!();
     eprintln!("Usage:");
     eprintln!("  {} [OPTIONS] <project.cbp> [output_dir]", program);
-    eprintln!("  {} merge-compile-commands [--json] <file1> <file2> ... [--output-dir <dir>] [--debug]", program);
+    eprintln!(
+        "  {} merge-compile-commands [--json] <file1> <file2> ... [--output-dir <dir>] [--debug]",
+        program
+    );
     eprintln!("  {} apply-config <config.yaml>", program);
     eprintln!("  {} --list-compilers", program);
     eprintln!("  {} --version | -v", program);
     eprintln!();
     eprintln!("Commands:");
     eprintln!("  merge-compile-commands [--json] <file1> <file2> ...");
-    eprintln!("                            Merge multiple compile_commands.json files from CBP projects,"
+    eprintln!(
+        "                            Merge multiple compile_commands.json files from CBP projects,"
     );
     eprintln!("                            or from JSON files directly with --json flag");
     eprintln!("  apply-config <config.yaml>");
-    eprintln!("                            Apply YAML compiler configuration to Code::Blocks default.conf");
+    eprintln!(
+        "                            Apply YAML compiler configuration to Code::Blocks default.conf"
+    );
     eprintln!();
     eprintln!("Options:");
     eprintln!("  --debug                  Enable debug logging");
@@ -423,7 +436,9 @@ fn print_convert_usage(program: &str) {
     eprintln!("  -l <type>                Short form for --linker");
     eprintln!("  --ninja <path>           Specify custom ninja executable path");
     eprintln!("  -n <path>                Short form for --ninja");
-    eprintln!("  --output-dir <dir>       Specify workspace root directory (for merge-compile-commands)");
+    eprintln!(
+        "  --output-dir <dir>       Specify workspace root directory (for merge-compile-commands)"
+    );
     eprintln!("  --list-compilers         List available Code::Blocks compiler configurations");
     eprintln!("  --version, -v            Show version information");
     eprintln!("  --help, -h               Show this help message");

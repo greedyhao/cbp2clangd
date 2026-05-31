@@ -1,11 +1,11 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// 普通源文件信息，包含编译和链接标志
 #[derive(Debug, Default, PartialEq)]
 pub struct SourceFileInfo {
-    pub filename: String,    // 文件名
-    pub compile: bool,       // 是否编译
-    pub link: bool,          // 是否链接
+    pub filename: String, // 文件名
+    pub compile: bool,    // 是否编译
+    pub link: bool,       // 是否链接
 }
 
 /// 编译命令结构，用于生成compile_commands.json
@@ -23,8 +23,8 @@ pub struct SpecialFileBuildInfo {
     #[allow(dead_code)]
     pub compiler_id: String, // 编译器ID
     pub build_command: String, // 构建命令模板
-    pub compile: bool,      // 是否编译
-    pub link: bool,         // 是否链接
+    pub compile: bool,    // 是否编译
+    pub link: bool,       // 是否链接
 }
 
 /// RISC-V架构特性信息
@@ -38,14 +38,14 @@ pub struct MarchInfo {
 /// 单个Build Target的配置信息
 #[derive(Debug, Default)]
 pub struct BuildTarget {
-    pub name: String,                   // Target名称 (如 "Debug", "Release")
-    pub output: String,                 // 输出文件路径
-    pub object_output: String,          // 对象文件输出目录
-    pub cflags: Vec<String>,            // 编译选项
-    pub defines: Vec<String>,           // 宏定义 (-D)
-    pub include_dirs: Vec<String>,      // 头文件目录 (-I)
-    pub linker_options: Vec<String>,    // 链接器选项
-    pub linker_libs: Vec<String>,       // 链接库
-    pub linker_lib_dirs: Vec<String>,   // 库搜索路径
-    pub march_info: MarchInfo,          // 架构信息
+    pub name: String,                 // Target名称 (如 "Debug", "Release")
+    pub output: String,               // 输出文件路径
+    pub object_output: String,        // 对象文件输出目录
+    pub cflags: Vec<String>,          // 编译选项
+    pub defines: Vec<String>,         // 宏定义 (-D)
+    pub include_dirs: Vec<String>,    // 头文件目录 (-I)
+    pub linker_options: Vec<String>,  // 链接器选项
+    pub linker_libs: Vec<String>,     // 链接库
+    pub linker_lib_dirs: Vec<String>, // 库搜索路径
+    pub march_info: MarchInfo,        // 架构信息
 }

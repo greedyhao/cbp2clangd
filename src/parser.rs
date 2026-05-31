@@ -1,6 +1,6 @@
-use crate::cb_config::CbCompilerConfig;
 use crate::ToolchainConfig;
-use crate::models::{BuildTarget, SpecialFileBuildInfo, SourceFileInfo};
+use crate::cb_config::CbCompilerConfig;
+use crate::models::{BuildTarget, SourceFileInfo, SpecialFileBuildInfo};
 use roxmltree::Document;
 use std::collections::HashSet;
 use std::path::Path;
@@ -9,16 +9,16 @@ use std::path::Path;
 pub struct ProjectInfo {
     pub compiler_id: String,
     pub project_name: String,
-    pub global_cflags: Vec<String>,          // 全局编译选项 (Project/Compiler)
-    pub global_include_dirs: Vec<String>,    // 全局头文件目录 (Project/Compiler)
-    pub global_linker_libs: Vec<String>,     // 全局链接库 (Project/Linker)
-    pub global_linker_options: Vec<String>,  // 全局链接器选项 (Project/Linker)
+    pub global_cflags: Vec<String>, // 全局编译选项 (Project/Compiler)
+    pub global_include_dirs: Vec<String>, // 全局头文件目录 (Project/Compiler)
+    pub global_linker_libs: Vec<String>, // 全局链接库 (Project/Linker)
+    pub global_linker_options: Vec<String>, // 全局链接器选项 (Project/Linker)
     pub global_linker_lib_dirs: Vec<String>, // 全局库搜索路径 (Project/Linker)
     pub source_files: Vec<SourceFileInfo>,
     pub special_files: Vec<SpecialFileBuildInfo>,
     pub prebuild_commands: Vec<String>,
     pub postbuild_commands: Vec<String>,
-    pub targets: Vec<BuildTarget>,           // 各个Build Target的配置
+    pub targets: Vec<BuildTarget>, // 各个Build Target的配置
     pub linker_type: String,
 }
 
@@ -143,7 +143,10 @@ pub fn parse_cbp_file(
             .children()
             .filter(|n| n.tag_name().name() == "Target")
         {
-            let target_name = target_node.attribute("title").unwrap_or("Default").to_string();
+            let target_name = target_node
+                .attribute("title")
+                .unwrap_or("Default")
+                .to_string();
             println!("Found target: {}", target_name);
 
             let mut target = BuildTarget {
@@ -152,7 +155,10 @@ pub fn parse_cbp_file(
             };
 
             // 解析Target级别的Option (output, object_output等)
-            for option_node in target_node.children().filter(|n| n.tag_name().name() == "Option") {
+            for option_node in target_node
+                .children()
+                .filter(|n| n.tag_name().name() == "Option")
+            {
                 if let Some(output) = option_node.attribute("output") {
                     target.output = output.to_string();
                 }
@@ -162,8 +168,14 @@ pub fn parse_cbp_file(
             }
 
             // 解析Target级别Compiler
-            if let Some(compiler_node) = target_node.children().find(|n| n.tag_name().name() == "Compiler") {
-                for add in compiler_node.children().filter(|n| n.tag_name().name() == "Add") {
+            if let Some(compiler_node) = target_node
+                .children()
+                .find(|n| n.tag_name().name() == "Compiler")
+            {
+                for add in compiler_node
+                    .children()
+                    .filter(|n| n.tag_name().name() == "Add")
+                {
                     if let Some(opt) = add.attribute("option") {
                         let opt_str = opt.to_string();
                         target.cflags.push(opt_str.clone());
@@ -183,8 +195,14 @@ pub fn parse_cbp_file(
             }
 
             // 解析Target级别Linker
-            if let Some(linker_node) = target_node.children().find(|n| n.tag_name().name() == "Linker") {
-                for add in linker_node.children().filter(|n| n.tag_name().name() == "Add") {
+            if let Some(linker_node) = target_node
+                .children()
+                .find(|n| n.tag_name().name() == "Linker")
+            {
+                for add in linker_node
+                    .children()
+                    .filter(|n| n.tag_name().name() == "Add")
+                {
                     if let Some(opt) = add.attribute("option") {
                         target.linker_options.push(opt.to_string());
                     }
@@ -211,7 +229,9 @@ pub fn parse_cbp_file(
                         target.object_output = "./".to_string();
                     } else {
                         target.object_output = parent_str;
-                        if !target.object_output.ends_with('/') && !target.object_output.ends_with('\\') {
+                        if !target.object_output.ends_with('/')
+                            && !target.object_output.ends_with('\\')
+                        {
                             target.object_output.push(std::path::MAIN_SEPARATOR);
                         }
                     }
@@ -248,20 +268,26 @@ pub fn parse_cbp_file(
     }
 
     // 对每个编译选项和include路径进行引号处理，防止空格导致命令解析错误
-    let quoted_global_cflags: Vec<_> = global_cflags.iter().map(|opt| {
-        if opt.contains(' ') {
-            format!("\"{}\"", opt)
-        } else {
-            opt.clone()
-        }
-    }).collect();
-    let quoted_include_dirs: Vec<_> = global_include_dirs.iter().map(|dir| {
-        if dir.contains(' ') {
-            format!("\"{}\"", dir)
-        } else {
-            dir.clone()
-        }
-    }).collect();
+    let quoted_global_cflags: Vec<_> = global_cflags
+        .iter()
+        .map(|opt| {
+            if opt.contains(' ') {
+                format!("\"{}\"", opt)
+            } else {
+                opt.clone()
+            }
+        })
+        .collect();
+    let quoted_include_dirs: Vec<_> = global_include_dirs
+        .iter()
+        .map(|dir| {
+            if dir.contains(' ') {
+                format!("\"{}\"", dir)
+            } else {
+                dir.clone()
+            }
+        })
+        .collect();
 
     let options_str = quoted_global_cflags.join(" ");
     let includes_str = quoted_include_dirs.join(" ");
@@ -390,15 +416,18 @@ pub fn parse_cbp_file(
                     .find(|(compiler, _)| compiler == &compiler_id)
                     .or_else(|| build_commands.first());
 
-                let (compiler_id, build_command) = if let Some((compiler, build_cmd)) = matching_build_cmd {
-                    (compiler.clone(), build_cmd.clone())
-                } else {
-                    // 没有匹配的构建命令，使用默认值
-                    (compiler_id.clone(), String::new())
-                };
+                let (compiler_id, build_command) =
+                    if let Some((compiler, build_cmd)) = matching_build_cmd {
+                        (compiler.clone(), build_cmd.clone())
+                    } else {
+                        // 没有匹配的构建命令，使用默认值
+                        (compiler_id.clone(), String::new())
+                    };
 
                 // 只处理有意义的特殊文件，忽略头文件等
-                let is_header_file = ext.map(|e| e.to_lowercase() == "h" || e.to_lowercase() == "hpp").unwrap_or(false);
+                let is_header_file = ext
+                    .map(|e| e.to_lowercase() == "h" || e.to_lowercase() == "hpp")
+                    .unwrap_or(false);
                 if !is_header_file {
                     special_files.push(SpecialFileBuildInfo {
                         filename: filename.to_string(),
@@ -519,7 +548,11 @@ mod tests {
         assert!(project.source_files.iter().any(|f| f.filename == "utils.c"));
 
         // 验证全局 include 路径 (注意解析器里添加了 -I 前缀)
-        assert!(project.global_include_dirs.contains(&"-Isrc/include".to_string()));
+        assert!(
+            project
+                .global_include_dirs
+                .contains(&"-Isrc/include".to_string())
+        );
 
         // 验证全局 Flag
         assert!(project.global_cflags.contains(&"-Wall".to_string()));
@@ -566,7 +599,10 @@ mod tests {
         let target = &project.targets[0];
         assert_eq!(target.march_info.full_march, "-march=rv32imac_xabcd");
         assert!(target.march_info.has_custom_extension);
-        assert_eq!(target.march_info.base_march, Some("-march=rv32imac".to_string()));
+        assert_eq!(
+            target.march_info.base_march,
+            Some("-march=rv32imac".to_string())
+        );
     }
 
     #[test]

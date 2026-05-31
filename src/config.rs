@@ -72,7 +72,10 @@ impl ToolchainConfig {
         let entry = entry.or_else(|| {
             let compiler_lower = compiler_id.to_lowercase();
             cb_config.compilers.values().find(|e| {
-                e.name.as_deref().map(|n| n.to_lowercase() == compiler_lower).unwrap_or(false)
+                e.name
+                    .as_deref()
+                    .map(|n| n.to_lowercase() == compiler_lower)
+                    .unwrap_or(false)
             })
         });
 
@@ -166,7 +169,16 @@ mod tests {
     use crate::cb_config::CbCompilerEntry;
     use std::collections::HashMap;
 
-    fn make_cb_config(entries: Vec<(&str, &str, Option<&str>, Option<&str>, Option<&str>, Option<&str>)>) -> CbCompilerConfig {
+    fn make_cb_config(
+        entries: Vec<(
+            &str,
+            &str,
+            Option<&str>,
+            Option<&str>,
+            Option<&str>,
+            Option<&str>,
+        )>,
+    ) -> CbCompilerConfig {
         let mut compilers = HashMap::new();
         for (id, master_path, c_compiler, cpp_compiler, linker, lib_linker) in entries {
             compilers.insert(
@@ -192,9 +204,14 @@ mod tests {
 
     #[test]
     fn test_resolve_toolchain_from_cb_config() {
-        let cb_config = make_cb_config(vec![
-            ("riscv32-v2", "D:\\CustomToolchain", Some("riscv32-elf-gcc.exe"), None, None, None),
-        ]);
+        let cb_config = make_cb_config(vec![(
+            "riscv32-v2",
+            "D:\\CustomToolchain",
+            Some("riscv32-elf-gcc.exe"),
+            None,
+            None,
+            None,
+        )]);
 
         let toolchain = ToolchainConfig::resolve_toolchain("riscv32-v2", &cb_config).unwrap();
         assert_eq!(toolchain.toolchain_base_path, "D:\\CustomToolchain");
@@ -211,22 +228,26 @@ mod tests {
             toolchain.linker_path("ld"),
             "D:\\CustomToolchain\\bin\\ld.exe"
         ); // 默认 ld
-        assert_eq!(
-            toolchain.ar_path(),
-            "D:\\CustomToolchain\\bin\\ar.exe"
-        ); // 默认 ar
+        assert_eq!(toolchain.ar_path(), "D:\\CustomToolchain\\bin\\ar.exe"); // 默认 ar
     }
 
     #[test]
     fn test_resolve_toolchain_with_all_fields() {
-        let cb_config = make_cb_config(vec![
-            ("mygcc", "C:\\MyToolchain",
-                Some("gcc.exe"), Some("g++.exe"), Some("ld.exe"), Some("ar.exe")),
-        ]);
+        let cb_config = make_cb_config(vec![(
+            "mygcc",
+            "C:\\MyToolchain",
+            Some("gcc.exe"),
+            Some("g++.exe"),
+            Some("ld.exe"),
+            Some("ar.exe"),
+        )]);
 
         let toolchain = ToolchainConfig::resolve_toolchain("mygcc", &cb_config).unwrap();
         assert_eq!(toolchain.compiler_path(), "C:\\MyToolchain\\bin\\gcc.exe");
-        assert_eq!(toolchain.cpp_compiler_path(), "C:\\MyToolchain\\bin\\g++.exe");
+        assert_eq!(
+            toolchain.cpp_compiler_path(),
+            "C:\\MyToolchain\\bin\\g++.exe"
+        );
         assert_eq!(toolchain.linker_path("ld"), "C:\\MyToolchain\\bin\\ld.exe");
         assert_eq!(toolchain.ar_path(), "C:\\MyToolchain\\bin\\ar.exe");
         assert_eq!(toolchain.get_base_path(), "C:\\MyToolchain");
@@ -234,13 +255,15 @@ mod tests {
 
     #[test]
     fn test_resolve_toolchain_unknown_compiler() {
-        let cb_config = make_cb_config(vec![
-            ("riscv32-v2", "D:\\V2", None, None, None, None),
-        ]);
+        let cb_config = make_cb_config(vec![("riscv32-v2", "D:\\V2", None, None, None, None)]);
 
         let result = ToolchainConfig::resolve_toolchain("unknown-compiler", &cb_config);
         assert!(result.is_err());
-        if let Err(ToolchainResolveError::UnknownCompiler { compiler_id, available }) = result {
+        if let Err(ToolchainResolveError::UnknownCompiler {
+            compiler_id,
+            available,
+        }) = result
+        {
             assert_eq!(compiler_id, "unknown-compiler");
             assert!(available.contains(&"riscv32-v2".to_string()));
         } else {
@@ -276,9 +299,7 @@ mod tests {
 
     #[test]
     fn test_default_compiler_fallback_names() {
-        let cb_config = make_cb_config(vec![
-            ("gcc", "C:\\MinGW", None, None, None, None),
-        ]);
+        let cb_config = make_cb_config(vec![("gcc", "C:\\MinGW", None, None, None, None)]);
 
         let toolchain = ToolchainConfig::resolve_toolchain("gcc", &cb_config).unwrap();
         // C_COMPILER 未设置 → 默认 gcc.exe
@@ -293,9 +314,14 @@ mod tests {
 
     #[test]
     fn test_compiler_availability() {
-        let cb_config = make_cb_config(vec![
-            ("exists", "C:\\DoesNotExist", Some("nonexistent.exe"), None, None, None),
-        ]);
+        let cb_config = make_cb_config(vec![(
+            "exists",
+            "C:\\DoesNotExist",
+            Some("nonexistent.exe"),
+            None,
+            None,
+            None,
+        )]);
 
         let toolchain = ToolchainConfig::resolve_toolchain("exists", &cb_config).unwrap();
         // 路径肯定不存在
@@ -376,7 +402,7 @@ mod tests {
             "riscv32".to_string(),
             CbCompilerEntry {
                 compiler_id: "riscv32".to_string(),
-                name: None,  // 没有 NAME
+                name: None, // 没有 NAME
                 master_path: Some("C:\\RV32".to_string()),
                 c_compiler: None,
                 cpp_compiler: None,

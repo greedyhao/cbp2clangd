@@ -222,18 +222,18 @@ pub fn get_clean_absolute_path(base: &Path, rel: &Path) -> PathBuf {
                 result = PathBuf::from(component.as_os_str());
             }
             Component::Prefix(prefix) => {
-                 // Windows 盘符，先设置盘符
-                 result = PathBuf::from(prefix.as_os_str());
-                 // 检查下一个组件是否是根目录（\）
-                 if let Some(next_component) = components.next() {
-                     if let Component::RootDir = next_component {
-                         // 如果是，将根目录添加到盘符后面
-                         result.push(next_component);
-                     } else {
-                         // 否则，重新处理这个组件
-                         result.push(next_component);
-                     }
-                 }
+                // Windows 盘符，先设置盘符
+                result = PathBuf::from(prefix.as_os_str());
+                // 检查下一个组件是否是根目录（\）
+                if let Some(next_component) = components.next() {
+                    if let Component::RootDir = next_component {
+                        // 如果是，将根目录添加到盘符后面
+                        result.push(next_component);
+                    } else {
+                        // 否则，重新处理这个组件
+                        result.push(next_component);
+                    }
+                }
             }
             Component::CurDir => {}
         }
@@ -244,12 +244,12 @@ pub fn get_clean_absolute_path(base: &Path, rel: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_debug_mode_toggle() {
         set_debug_mode(true);
         assert!(is_debug_mode());
-        
+
         set_debug_mode(false);
         assert!(!is_debug_mode());
     }
@@ -264,7 +264,7 @@ mod tests {
         // 只要不是 error 就可以，具体路径依赖系统
         assert!(result.is_ok());
         if let Ok(p) = result {
-             assert_eq!(p, "C:\\Windows\\System32"); // 因为没空格
+            assert_eq!(p, "C:\\Windows\\System32"); // 因为没空格
         }
     }
 

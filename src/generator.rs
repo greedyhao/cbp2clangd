@@ -3,8 +3,8 @@ use crate::debug_println;
 use crate::models::CompileCommand;
 use crate::parser::ProjectInfo;
 use crate::utils::{escape_ninja_path, get_clean_absolute_path, get_short_path, quote_if_needed};
-use std::path::{Component, Path, PathBuf};
 use std::fs;
+use std::path::{Component, Path, PathBuf};
 
 /// 辅助函数：将Path转换为Windows风格的字符串路径（使用反斜杠作为分隔符）
 fn normalize_path(path: &Path) -> String {
@@ -43,14 +43,17 @@ fn sanitize_flag(flag: &str) -> String {
     flag.replace("/", "\\")
 }
 
-
 /// 辅助函数：计算一组路径的共同祖先目录
 fn find_common_ancestor(paths: &[PathBuf]) -> PathBuf {
-    if paths.is_empty() { return PathBuf::from("."); }
+    if paths.is_empty() {
+        return PathBuf::from(".");
+    }
     let mut ancestor = paths[0].parent().unwrap_or(Path::new("")).to_path_buf();
     for path in paths.iter().skip(1) {
         while !path.starts_with(&ancestor) {
-            if !ancestor.pop() { return PathBuf::from("."); }
+            if !ancestor.pop() {
+                return PathBuf::from(".");
+            }
         }
     }
     ancestor
@@ -106,12 +109,18 @@ pub fn generate_clangd_config(
     for flag in &project_info.global_cflags {
         // 跳过-march选项，因为我们会单独处理
         if flag.starts_with("-march=") {
-            debug_println!("[DEBUG generator] Skipping march flag from global_cflags: {}", flag);
+            debug_println!(
+                "[DEBUG generator] Skipping march flag from global_cflags: {}",
+                flag
+            );
             continue;
         }
         // 跳过对 clangd 无用的编译选项
         if skip_add_flags.contains(flag.as_str()) {
-            debug_println!("[DEBUG generator] Skipping unnecessary flag from global_cflags: {}", flag);
+            debug_println!(
+                "[DEBUG generator] Skipping unnecessary flag from global_cflags: {}",
+                flag
+            );
             continue;
         }
         debug_println!("[DEBUG generator] Added global flag: {}", flag);
@@ -120,14 +129,23 @@ pub fn generate_clangd_config(
 
     // 添加target特定的编译选项
     if let Some(target) = target {
-        debug_println!("[DEBUG generator] Adding target-specific flags for '{}'...", target.name);
+        debug_println!(
+            "[DEBUG generator] Adding target-specific flags for '{}'...",
+            target.name
+        );
         for flag in &target.cflags {
             if flag.starts_with("-march=") {
-                debug_println!("[DEBUG generator] Skipping march flag from target: {}", flag);
+                debug_println!(
+                    "[DEBUG generator] Skipping march flag from target: {}",
+                    flag
+                );
                 continue;
             }
             if skip_add_flags.contains(flag.as_str()) {
-                debug_println!("[DEBUG generator] Skipping unnecessary flag from target: {}", flag);
+                debug_println!(
+                    "[DEBUG generator] Skipping unnecessary flag from target: {}",
+                    flag
+                );
                 continue;
             }
             debug_println!("[DEBUG generator] Added target flag: {}", flag);
@@ -147,7 +165,10 @@ pub fn generate_clangd_config(
                 add_flags.push(base_march.as_str());
             }
         } else if !target.march_info.full_march.is_empty() {
-            debug_println!("[DEBUG generator] Adding full march: {}", target.march_info.full_march);
+            debug_println!(
+                "[DEBUG generator] Adding full march: {}",
+                target.march_info.full_march
+            );
             add_flags.push(&target.march_info.full_march[..]);
         }
     }
@@ -199,14 +220,16 @@ pub fn generate_clangd_config(
 /// 使用第一个target的object_output作为数据库路径
 pub fn generate_clangd_fragment(
     project_info: &ProjectInfo,
-    project_dir: &Path,     // CBP 目录
-    workspace_root: &Path,  // .clangd 根目录
-    _db_path: &Path,        // compile_commands.json 目录 (现在使用target特定的路径)
+    project_dir: &Path,    // CBP 目录
+    workspace_root: &Path, // .clangd 根目录
+    _db_path: &Path,       // compile_commands.json 目录 (现在使用target特定的路径)
 ) -> Result<(String, String), Box<dyn std::error::Error>> {
     debug_println!("[DEBUG generator] Generating clangd fragment...");
 
     // 1. 计算 PathMatch (基于源文件共同祖先)
-    let abs_source_paths: Vec<PathBuf> = project_info.source_files.iter()
+    let abs_source_paths: Vec<PathBuf> = project_info
+        .source_files
+        .iter()
         .map(|src| get_clean_absolute_path(project_dir, Path::new(&src.filename)))
         .collect();
 
@@ -266,10 +289,14 @@ pub fn generate_compile_commands(
     );
 
     // 获取要使用的target
-    let target = target.or_else(|| project_info.targets.first())
+    let target = target
+        .or_else(|| project_info.targets.first())
         .expect("No target available");
 
-    debug_println!("[DEBUG generator] Generating compile commands for target: {}", target.name);
+    debug_println!(
+        "[DEBUG generator] Generating compile commands for target: {}",
+        target.name
+    );
 
     // 使用工具链中的编译器路径，但如果路径不存在，使用占位符
     debug_println!("[DEBUG generator] Getting compiler path from toolchain...");
@@ -391,7 +418,9 @@ pub fn generate_compile_commands(
         // === 修改关键点：避免使用 canonicalize ===
         // 之前使用: abs_path_buf.canonicalize() 会导致 Z: 变 \\server\share
         // 现在使用: get_clean_absolute_path 仅做逻辑拼接
-        debug_println!("[DEBUG generator] Calculating absolute path for source file (logically)...");
+        debug_println!(
+            "[DEBUG generator] Calculating absolute path for source file (logically)..."
+        );
         let abs_path_buf = get_clean_absolute_path(project_dir, Path::new(&src.filename));
 
         // 转换为字符串并标准化分隔符
@@ -424,7 +453,10 @@ pub fn generate_compile_commands(
         cmd.push(&src_path_for_cmd);
 
         // 对每个命令参数进行引号处理，防止空格导致命令解析错误
-        let quoted_cmd = cmd.iter().map(|&arg| quote_if_needed(arg)).collect::<Vec<_>>();
+        let quoted_cmd = cmd
+            .iter()
+            .map(|&arg| quote_if_needed(arg))
+            .collect::<Vec<_>>();
         let command_str = quoted_cmd.join(" ");
         debug_println!("[DEBUG generator] Generated command: {}", command_str);
 
@@ -511,7 +543,7 @@ fn resolve_library_path(lib: &str, lib_dirs: &[String], root_dir: &Path) -> Opti
         } else {
             root_dir.join(p)
         };
-        
+
         if full_p.exists() {
             return Some(finalize_path(full_p));
         }
@@ -527,7 +559,7 @@ fn resolve_library_path(lib: &str, lib_dirs: &[String], root_dir: &Path) -> Opti
         };
 
         let dir_path = Path::new(raw_dir);
-        
+
         // 解析库目录的实际位置
         let search_dir = if dir_path.is_absolute() {
             dir_path.to_path_buf()
@@ -558,10 +590,12 @@ pub fn generate_ninja_build(
     debug_println!("[DEBUG generator] Starting to generate ninja build file...");
 
     // 获取要使用的target
-    let target = project_info.targets.first()
-        .expect("No target available");
+    let target = project_info.targets.first().expect("No target available");
 
-    debug_println!("[DEBUG generator] Generating ninja build for target: {}", target.name);
+    debug_println!(
+        "[DEBUG generator] Generating ninja build for target: {}",
+        target.name
+    );
 
     // 使用工具链中的编译器路径
     let compiler_path = toolchain.compiler_path();
@@ -570,12 +604,18 @@ pub fn generate_ninja_build(
         match get_short_path(&compiler_path) {
             Ok(short_path) => short_path,
             Err(e) => {
-                println!("[WARNING generator] Failed to get short path for compiler: {}. Using original path.", e);
+                println!(
+                    "[WARNING generator] Failed to get short path for compiler: {}. Using original path.",
+                    e
+                );
                 compiler_path.clone()
             }
         }
     } else {
-        println!("[WARNING generator] Compiler path {} does not exist. Using placeholder.", compiler_path);
+        println!(
+            "[WARNING generator] Compiler path {} does not exist. Using placeholder.",
+            compiler_path
+        );
         std::path::Path::new(&compiler_path)
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
@@ -589,12 +629,18 @@ pub fn generate_ninja_build(
         match get_short_path(&linker_path) {
             Ok(short_path) => short_path,
             Err(e) => {
-                println!("[WARNING generator] Failed to get short path for linker: {}. Using original path.", e);
+                println!(
+                    "[WARNING generator] Failed to get short path for linker: {}. Using original path.",
+                    e
+                );
                 linker_path.clone()
             }
         }
     } else {
-        println!("[WARNING generator] Linker path {} does not exist. Using placeholder.", linker_path);
+        println!(
+            "[WARNING generator] Linker path {} does not exist. Using placeholder.",
+            linker_path
+        );
         std::path::Path::new(&linker_path)
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
@@ -653,7 +699,7 @@ pub fn generate_ninja_build(
     let mut ninja_content = String::new();
     ninja_content.push_str("# Generated by cbp2clangd\n");
     ninja_content.push_str("\n");
-    
+
     // Rule: CC
     ninja_content.push_str("rule cc\n");
     ninja_content.push_str(&format!(
@@ -666,13 +712,18 @@ pub fn generate_ninja_build(
 
     // === 新增逻辑：计算所有源文件的共同祖先目录，以保持目录结构 ===
     // 1. 获取所有源文件的逻辑绝对路径
-    let abs_source_paths: Vec<PathBuf> = project_info.source_files.iter()
+    let abs_source_paths: Vec<PathBuf> = project_info
+        .source_files
+        .iter()
         .map(|src| get_clean_absolute_path(project_dir, Path::new(&src.filename)))
         .collect();
 
     // 2. 找到共同祖先目录
     let common_ancestor = find_common_ancestor(&abs_source_paths);
-    debug_println!("[DEBUG generator] Common source ancestor: {}", common_ancestor.display());
+    debug_println!(
+        "[DEBUG generator] Common source ancestor: {}",
+        common_ancestor.display()
+    );
 
     // 构建对象文件列表
     let mut regular_obj_files = Vec::new();
@@ -681,15 +732,21 @@ pub fn generate_ninja_build(
 
     // 处理普通源文件
     // 同时遍历 SourceFileInfo 和 计算出的绝对路径
-    for (src_info, abs_path) in project_info.source_files.iter().zip(abs_source_paths.iter()) {
+    for (src_info, abs_path) in project_info
+        .source_files
+        .iter()
+        .zip(abs_source_paths.iter())
+    {
         let src_path = Path::new(&src_info.filename);
 
         // 3. 计算相对于共同祖先的路径
         // 如果 strip_prefix 失败（例如跨盘符），回退到使用文件名
-        let relative_structure: &Path = abs_path.strip_prefix(&common_ancestor)
-            .unwrap_or_else(|_| match src_path.file_name() {
-                Some(name) => Path::new(name),
-                None => src_path,
+        let relative_structure: &Path =
+            abs_path.strip_prefix(&common_ancestor).unwrap_or_else(|_| {
+                match src_path.file_name() {
+                    Some(name) => Path::new(name),
+                    None => src_path,
+                }
             });
 
         // 4. 构建最终的对象文件路径：object_output + 相对结构 + .o
@@ -699,16 +756,16 @@ pub fn generate_ninja_build(
 
         let obj_name = normalize_path(&obj_path_buf);
         let clean_src = normalize_path(src_path);
-        
+
         // 对 Ninja 构建文件中的路径进行转义，处理空格和冒号
         let escaped_obj_name = escape_ninja_path(&obj_name);
         let escaped_src = escape_ninja_path(&clean_src);
-        
+
         // 如果需要链接，将对象文件添加到链接列表中
         if src_info.link {
             regular_obj_files.push(escaped_obj_name.clone());
         }
-        
+
         // 如果需要编译，添加到编译规则映射中
         if src_info.compile {
             src_to_obj_map.push((escaped_src, escaped_obj_name));
@@ -721,7 +778,10 @@ pub fn generate_ninja_build(
     for special_file in &project_info.special_files {
         // 只有compile为true的特殊文件才处理
         if !special_file.compile {
-            debug_println!("[DEBUG generator] Skipping special file {} (compile is false)", special_file.filename);
+            debug_println!(
+                "[DEBUG generator] Skipping special file {} (compile is false)",
+                special_file.filename
+            );
             continue;
         }
 
@@ -731,10 +791,13 @@ pub fn generate_ninja_build(
         // 路径标准化处理
         let clean_file_path = normalize_path(Path::new(&special_file.filename));
         // 合并全局include和target特定include
-        let all_includes: Vec<_> = project_info.global_include_dirs.iter()
+        let all_includes: Vec<_> = project_info
+            .global_include_dirs
+            .iter()
             .chain(target.include_dirs.iter())
             .collect();
-        let clean_includes = all_includes.iter()
+        let clean_includes = all_includes
+            .iter()
             .map(|p| normalize_path(Path::new(p)))
             .collect::<Vec<_>>()
             .join(" ");
@@ -761,77 +824,81 @@ pub fn generate_ninja_build(
             // 对特殊文件也应用类似的逻辑，尝试保持结构，但因为它是自定义命令，
             // 通常由用户指定输出位置。这里只做简单的 fallback
             let abs_path = get_clean_absolute_path(project_dir, Path::new(&special_file.filename));
-            let relative_structure: &Path = abs_path.strip_prefix(&common_ancestor)
+            let relative_structure: &Path = abs_path
+                .strip_prefix(&common_ancestor)
                 .unwrap_or_else(|_| Path::new(&special_file.filename));
-            
+
             let full_path = Path::new(&target.object_output)
                 .join(relative_structure)
                 .with_extension("o");
-                    
+
             normalize_path(&full_path)
         };
 
         // 对 Ninja 构建文件中的路径进行转义，处理空格和冒号
         let escaped_output_file = escape_ninja_path(&output_file);
         let escaped_clean_file_path = escape_ninja_path(&clean_file_path);
-            
+
         // 所有compile为true的特殊文件都需要被添加到链接规则中
         // 特殊文件的输出文件必须作为依赖，否则编译命令不会执行
         special_output_files.push(escaped_output_file.clone());
 
-            let rule_name = format!(
-                "special_{}",
-                special_file
-                    .filename
-                    .replace(".", "_")
-                    .replace("/", "_")
-                    .replace("\\", "_")
-                    .replace(":", "_")
-            );
+        let rule_name = format!(
+            "special_{}",
+            special_file
+                .filename
+                .replace(".", "_")
+                .replace("/", "_")
+                .replace("\\", "_")
+                .replace(":", "_")
+        );
 
-            // 如果构建命令为空，生成一个创建空.o文件的命令
-            let final_command = if processed_cmd.is_empty() {
-                // 在Windows上创建空文件的命令：先创建目录，再创建文件
-                let output_path = Path::new(&output_file);
-                let output_dir = output_path.parent().unwrap_or(Path::new("."));
-                let output_dir_str = normalize_path(output_dir);
+        // 如果构建命令为空，生成一个创建空.o文件的命令
+        let final_command = if processed_cmd.is_empty() {
+            // 在Windows上创建空文件的命令：先创建目录，再创建文件
+            let output_path = Path::new(&output_file);
+            let output_dir = output_path.parent().unwrap_or(Path::new("."));
+            let output_dir_str = normalize_path(output_dir);
 
-                // 使用mkdir命令创建目录（如果不存在），然后创建空文件
-                // 注意：ninja在Windows上使用cmd.exe执行命令，所以需要用cmd /c来运行多个命令
-                format!("cmd /c (mkdir {} >nul 2>&1) & (type nul > {})", output_dir_str, output_file)
-            } else {
-                processed_cmd
-            };
+            // 使用mkdir命令创建目录（如果不存在），然后创建空文件
+            // 注意：ninja在Windows上使用cmd.exe执行命令，所以需要用cmd /c来运行多个命令
+            format!(
+                "cmd /c (mkdir {} >nul 2>&1) & (type nul > {})",
+                output_dir_str, output_file
+            )
+        } else {
+            processed_cmd
+        };
 
-            // 检查是否是编译命令（包含编译器），如果是则添加依赖跟踪
-            let is_compile_command = final_command.contains(&compiler) ||
-                                   final_command.contains("gcc") ||
-                                   final_command.contains("g++") ||
-                                   final_command.contains("clang") ||
-                                   final_command.contains("clang++");
+        // 检查是否是编译命令（包含编译器），如果是则添加依赖跟踪
+        let is_compile_command = final_command.contains(&compiler)
+            || final_command.contains("gcc")
+            || final_command.contains("g++")
+            || final_command.contains("clang")
+            || final_command.contains("clang++");
 
-            ninja_content.push_str(&format!("rule {}\n", rule_name));
+        ninja_content.push_str(&format!("rule {}\n", rule_name));
 
-            if is_compile_command {
-                // 为编译命令添加依赖跟踪
-                // 需要确保 -MMD -MF $out.d 是在编译器之后添加的，但要在输入文件之前
-                let modified_command = insert_dependency_flags(final_command, &compiler);
+        if is_compile_command {
+            // 为编译命令添加依赖跟踪
+            // 需要确保 -MMD -MF $out.d 是在编译器之后添加的，但要在输入文件之前
+            let modified_command = insert_dependency_flags(final_command, &compiler);
 
-                ninja_content.push_str(&format!("  command = {}\n", modified_command));
-                ninja_content.push_str("  depfile = $out.d\n");
-                ninja_content.push_str("  deps = gcc\n");
-            } else {
-                // 非编译命令，不添加依赖跟踪
-                ninja_content.push_str(&format!("  command = {}\n", final_command));
-            }
-            ninja_content.push_str("\n");
-
-            ninja_content.push_str(&format!(
-                "build {}: {} {}\n",
-                escaped_output_file, rule_name, escaped_clean_file_path
-            ));
-            ninja_content.push_str("\n");
+            ninja_content.push_str(&format!("  command = {}\n", modified_command));
+            ninja_content.push_str("  depfile = $out.d\n");
+            ninja_content.push_str("  deps = gcc\n");
+        } else {
+            // 非编译命令，不添加依赖跟踪
+            ninja_content.push_str(&format!("  command = {}\n", final_command));
         }
+        ninja_content.push_str("\n");
+
+        ninja_content.push_str(&format!(
+            "build {}: {} {}\n",
+            escaped_output_file, rule_name, escaped_clean_file_path
+        ));
+        ninja_content.push_str("\n");
+    }
 
     // 构建部分 - 普通源文件
     ninja_content.reserve(src_to_obj_map.len() * 100); // Pre-allocate space for build rules
@@ -860,7 +927,7 @@ pub fn generate_ninja_build(
             }
         }
     }
-    
+
     // 对目标文件名进行 Ninja 路径转义处理
     let escaped_target_name = escape_ninja_path(&target_name);
 
@@ -873,12 +940,18 @@ pub fn generate_ninja_build(
             match get_short_path(&ar_path) {
                 Ok(short_path) => short_path,
                 Err(e) => {
-                    println!("[WARNING generator] Failed to get short path for ar: {}. Using original.", e);
+                    println!(
+                        "[WARNING generator] Failed to get short path for ar: {}. Using original.",
+                        e
+                    );
                     ar_path.clone()
                 }
             }
         } else {
-            println!("[WARNING generator] Ar path {} does not exist. Using placeholder.", ar_path);
+            println!(
+                "[WARNING generator] Ar path {} does not exist. Using placeholder.",
+                ar_path
+            );
             std::path::Path::new(&ar_path)
                 .file_stem()
                 .map(|s| s.to_string_lossy().to_string())
@@ -894,9 +967,9 @@ pub fn generate_ninja_build(
 
         // 特殊文件的输出作为隐式依赖，放到 | 符号后面
         let deps_str = if special_output_files.is_empty() {
-             String::new()
+            String::new()
         } else {
-             format!(" | {}", special_output_files.join(" "))
+            format!(" | {}", special_output_files.join(" "))
         };
 
         ninja_content.push_str(&format!(
@@ -905,22 +978,25 @@ pub fn generate_ninja_build(
             regular_obj_files.join(" "),
             deps_str
         ));
-
     } else {
         // 可执行文件目标
         let mut pre_link_flags: Vec<String> = Vec::new();
         let mut lib_flags: Vec<String> = Vec::new();
-        
+
         // 1. 解析库依赖
         let mut resolved_lib_dependencies = Vec::new();
 
         debug_println!("[DEBUG generator] Resolving library dependencies...");
 
         // 合并全局链接库和target特定的链接库
-        let all_libs: Vec<_> = project_info.global_linker_libs.iter()
+        let all_libs: Vec<_> = project_info
+            .global_linker_libs
+            .iter()
             .chain(target.linker_libs.iter())
             .collect();
-        let all_lib_dirs: Vec<String> = project_info.global_linker_lib_dirs.iter()
+        let all_lib_dirs: Vec<String> = project_info
+            .global_linker_lib_dirs
+            .iter()
             .chain(target.linker_lib_dirs.iter())
             .cloned()
             .collect();
@@ -933,22 +1009,31 @@ pub fn generate_ninja_build(
 
             // 依赖解析逻辑（用于 ninja 的 implicit deps）
             if let Some(resolved_path) = resolve_library_path(lib, &all_lib_dirs, project_dir) {
-                debug_println!("[DEBUG generator] Resolved library {} to {}", lib, resolved_path);
+                debug_println!(
+                    "[DEBUG generator] Resolved library {} to {}",
+                    lib,
+                    resolved_path
+                );
                 resolved_lib_dependencies.push(resolved_path);
             } else {
-                debug_println!("[DEBUG generator] Could not resolve library path for {}", lib);
+                debug_println!(
+                    "[DEBUG generator] Could not resolve library path for {}",
+                    lib
+                );
             }
         }
 
         // 添加链接器选项 (全局 + target特定)
         for opt in &project_info.global_linker_options {
             let replaced_opt = opt.replace("$(TARGET_OBJECT_DIR)", &clean_obj_dir);
-            let replaced_opt = replaced_opt.replace("$(TARGET_OUTPUT_DIR)", &clean_target_output_dir);
+            let replaced_opt =
+                replaced_opt.replace("$(TARGET_OUTPUT_DIR)", &clean_target_output_dir);
             pre_link_flags.push(sanitize_flag(&replaced_opt));
         }
         for opt in &target.linker_options {
             let replaced_opt = opt.replace("$(TARGET_OBJECT_DIR)", &clean_obj_dir);
-            let replaced_opt = replaced_opt.replace("$(TARGET_OUTPUT_DIR)", &clean_target_output_dir);
+            let replaced_opt =
+                replaced_opt.replace("$(TARGET_OUTPUT_DIR)", &clean_target_output_dir);
             // Linker options 可能包含 -Map=output/path.map 之类的，需要转换路径分隔符
             pre_link_flags.push(sanitize_flag(&replaced_opt));
         }
@@ -1030,18 +1115,21 @@ fn find_compiler_position(command: &str, compiler: &str) -> Option<usize> {
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
-    let compiler_variants = [
-        "gcc", "g++", "clang", "clang++",
-        &compiler_stem[..],
-    ];
+    let compiler_variants = ["gcc", "g++", "clang", "clang++", &compiler_stem[..]];
 
     for variant in &compiler_variants {
-        if variant.is_empty() { continue; }
+        if variant.is_empty() {
+            continue;
+        }
         if let Some(pos) = command.find(variant) {
             // 确保匹配的是独立的单词（前后是空格或边界）
             let start_ok = pos == 0 || command.chars().nth(pos - 1).unwrap().is_whitespace();
-            let end_ok = pos + variant.len() == command.len() ||
-                        command.chars().nth(pos + variant.len()).unwrap().is_whitespace();
+            let end_ok = pos + variant.len() == command.len()
+                || command
+                    .chars()
+                    .nth(pos + variant.len())
+                    .unwrap()
+                    .is_whitespace();
 
             if start_ok && end_ok {
                 return Some(pos);
@@ -1088,8 +1176,8 @@ pub fn merge_clangd_config(existing_content: &str, new_compile_flags: &str) -> S
 
         // 检查是否是顶级的 CompileFlags 部分（即不是在 If 部分内的）
         // 顶级部分：没有缩进或只有少量缩进（不足以成为子项）
-        if line.trim_start().starts_with("CompileFlags:") &&
-           (!line.starts_with("  ")) { // 顶级部分（没有缩进）
+        if line.trim_start().starts_with("CompileFlags:") && (!line.starts_with("  ")) {
+            // 顶级部分（没有缩进）
             if !found_global_compile_flags {
                 // 第一次遇到全局 CompileFlags，用新的替换
                 // 将 new_compile_flags 按行分割，避免多余的换行符
@@ -1105,8 +1193,9 @@ pub fn merge_clangd_config(existing_content: &str, new_compile_flags: &str) -> S
                     let trimmed = next_line.trim_start();
 
                     // 检查是否是 CompileFlags 的子项（以缩进开始）
-                    if !trimmed.is_empty() &&
-                       (next_line.starts_with("  ") || next_line.starts_with('\t')) {
+                    if !trimmed.is_empty()
+                        && (next_line.starts_with("  ") || next_line.starts_with('\t'))
+                    {
                         // 这仍然是 CompileFlags 的一部分，跳过
                         i += 1;
                         continue;
@@ -1123,8 +1212,9 @@ pub fn merge_clangd_config(existing_content: &str, new_compile_flags: &str) -> S
                     let next_line = lines[i];
                     let trimmed = next_line.trim_start();
 
-                    if !trimmed.is_empty() &&
-                       (next_line.starts_with("  ") || next_line.starts_with('\t')) {
+                    if !trimmed.is_empty()
+                        && (next_line.starts_with("  ") || next_line.starts_with('\t'))
+                    {
                         i += 1;
                         continue;
                     } else {
@@ -1153,8 +1243,9 @@ pub fn merge_clangd_config(existing_content: &str, new_compile_flags: &str) -> S
                         let trimmed = nested_line.trim_start();
 
                         // 检查是否是 CompileFlags 的子项
-                        if !trimmed.is_empty() &&
-                           (nested_line.starts_with("    ") || nested_line.starts_with("\t\t")) {
+                        if !trimmed.is_empty()
+                            && (nested_line.starts_with("    ") || nested_line.starts_with("\t\t"))
+                        {
                             i += 1;
                             continue;
                         } else {
@@ -1166,20 +1257,20 @@ pub fn merge_clangd_config(existing_content: &str, new_compile_flags: &str) -> S
 
                 // 检查是否离开了 If 部分（遇到了新的顶级部分）
                 // 检查是否有缩进而且不是 If 部分的延续
-                let is_top_level = current_line.trim() != "" &&
-                                  !current_line.starts_with(' ') &&
-                                  !current_line.starts_with('\t');
+                let is_top_level = current_line.trim() != ""
+                    && !current_line.starts_with(' ')
+                    && !current_line.starts_with('\t');
 
-                let is_known_section = current_line.trim_start().starts_with("If:") ||
-                                      current_line.trim_start().starts_with("CompileFlags:") ||
-                                      current_line.trim_start().starts_with("Index:") ||
-                                      current_line.trim_start().starts_with("Completion:") ||
-                                      current_line.trim_start().starts_with("Diagnostics:") ||
-                                      current_line.trim_start().starts_with("Hover:") ||
-                                      current_line.trim_start().starts_with("InlayHints:") ||
-                                      current_line.trim_start().starts_with("MemoryUsage:") ||
-                                      current_line.trim_start().starts_with("PublishDiagnostics:") ||
-                                      current_line.trim_start().starts_with("WorkspaceSymbol:");
+                let is_known_section = current_line.trim_start().starts_with("If:")
+                    || current_line.trim_start().starts_with("CompileFlags:")
+                    || current_line.trim_start().starts_with("Index:")
+                    || current_line.trim_start().starts_with("Completion:")
+                    || current_line.trim_start().starts_with("Diagnostics:")
+                    || current_line.trim_start().starts_with("Hover:")
+                    || current_line.trim_start().starts_with("InlayHints:")
+                    || current_line.trim_start().starts_with("MemoryUsage:")
+                    || current_line.trim_start().starts_with("PublishDiagnostics:")
+                    || current_line.trim_start().starts_with("WorkspaceSymbol:");
 
                 if is_top_level && is_known_section {
                     // 这是新的顶级部分，离开 If 块
@@ -1206,7 +1297,7 @@ pub fn merge_clangd_config(existing_content: &str, new_compile_flags: &str) -> S
             new_content.push_str(line);
             new_content.push('\n');
         }
-        
+
         if !result_lines.is_empty() {
             for line in result_lines {
                 new_content.push_str(line);
@@ -1296,11 +1387,11 @@ pub fn generate_build_script(
 }
 
 /// 合并多个 compile_commands.json 文件到第一个文件中
-/// 
+///
 /// # 参数
 /// * `json_paths` - JSON 文件路径列表，第一个文件将作为合并目标
 /// * `workspace_root` - workspace 根目录，用于生成 .clangd 文件
-/// 
+///
 /// # 返回
 /// * `Ok(())` - 合并成功
 /// * `Err(Box<dyn Error>)` - 发生错误
@@ -1309,59 +1400,65 @@ pub fn merge_compile_commands(
     workspace_root: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     debug_println!("[DEBUG generator] Starting to merge compile_commands.json files...");
-    
+
     if json_paths.is_empty() {
         return Err("At least one JSON file is required".into());
     }
-    
+
     // 1. 读取第一个 JSON 文件作为基础
     let first_json_path = &json_paths[0];
-    debug_println!("[DEBUG generator] Reading base JSON: {}", first_json_path.display());
-    
+    debug_println!(
+        "[DEBUG generator] Reading base JSON: {}",
+        first_json_path.display()
+    );
+
     if !first_json_path.exists() {
         return Err(format!("Base JSON file not found: {}", first_json_path.display()).into());
     }
-    
+
     let mut merged_commands: Vec<CompileCommand> = {
         let content = fs::read_to_string(first_json_path)?;
         serde_json::from_str(&content)?
     };
-    
+
     debug_println!(
         "[DEBUG generator] Base JSON contains {} commands",
         merged_commands.len()
     );
-    
+
     // 2. 读取并合并后续所有 JSON 文件
     for json_path in json_paths.iter().skip(1) {
         debug_println!("[DEBUG generator] Merging JSON: {}", json_path.display());
-        
+
         if !json_path.exists() {
-            eprintln!("Warning: JSON file not found, skipping: {}", json_path.display());
+            eprintln!(
+                "Warning: JSON file not found, skipping: {}",
+                json_path.display()
+            );
             continue;
         }
-        
+
         let content = fs::read_to_string(json_path)?;
         let mut commands: Vec<CompileCommand> = serde_json::from_str(&content)?;
-        
+
         debug_println!(
             "[DEBUG generator] This JSON contains {} commands",
             commands.len()
         );
-        
+
         merged_commands.append(&mut commands);
     }
-    
+
     // 3. 写回第一个 JSON 文件
     debug_println!(
         "[DEBUG generator] Writing merged commands ({} total) to: {}",
         merged_commands.len(),
         first_json_path.display()
     );
-    
+
     let json_content = serde_json::to_string_pretty(&merged_commands)?;
     fs::write(first_json_path, json_content)?;
-    
+
     // 4. 更新 .clangd 配置文件
     // 目标格式：将 CompilationDatabase 添加到现有 CompileFlags 块内部
     let clangd_path = workspace_root.join(".clangd");
@@ -1386,10 +1483,7 @@ pub fn merge_compile_commands(
     // 合并配置：移除所有 If 片段，将 CompilationDatabase 添加到 CompileFlags 内部
     let final_content = if existing_clangd.trim().is_empty() {
         // 新文件：创建完整的配置
-        format!(
-            "CompileFlags:\n  CompilationDatabase: {}\n",
-            db_path_str
-        )
+        format!("CompileFlags:\n  CompilationDatabase: {}\n", db_path_str)
     } else {
         // 步骤1：按 --- 分割，只保留 --- 之前的部分（主配置）
         let parts: Vec<&str> = existing_clangd.split("\n---").collect();
@@ -1398,10 +1492,7 @@ pub fn merge_compile_commands(
         // 步骤2：在 CompileFlags 中添加 CompilationDatabase
         if base_content.is_empty() {
             // 空内容，创建新的
-            format!(
-                "CompileFlags:\n  CompilationDatabase: {}\n",
-                db_path_str
-            )
+            format!("CompileFlags:\n  CompilationDatabase: {}\n", db_path_str)
         } else {
             // 已有内容：在 CompileFlags 块中添加 CompilationDatabase
             let lines: Vec<&str> = base_content.lines().collect();
@@ -1422,14 +1513,16 @@ pub fn merge_compile_commands(
                     new_lines.push(line.to_string());
                 }
             }
-            debug_println!("[DEBUG generator] Successfully updated .clangd with CompilationDatabase: {:?}", new_lines);
+            debug_println!(
+                "[DEBUG generator] Successfully updated .clangd with CompilationDatabase: {:?}",
+                new_lines
+            );
 
             // 如果没有找到 CompileFlags（异常情况），在开头添加
             if !added {
                 format!(
                     "CompileFlags:\n  CompilationDatabase: {}\n\n{}",
-                    db_path_str,
-                    base_content
+                    db_path_str, base_content
                 )
             } else {
                 new_lines.join("\n")
@@ -1443,12 +1536,12 @@ pub fn merge_compile_commands(
         clangd_path.display(),
         db_path_str
     );
-    
+
     debug_println!(
         "[DEBUG generator] Successfully merged {} compile_commands.json files",
         json_paths.len()
     );
-    
+
     Ok(())
 }
 
@@ -1478,7 +1571,10 @@ mod tests {
         // 测试库文件
         assert_eq!(sanitize_flag("libs/libm.a"), "libs\\libm.a");
         // 测试复杂路径
-        assert_eq!(sanitize_flag("../../libs/libfoo.a"), "..\\..\\libs\\libfoo.a");
+        assert_eq!(
+            sanitize_flag("../../libs/libfoo.a"),
+            "..\\..\\libs\\libfoo.a"
+        );
         // 测试非路径标志
         assert_eq!(sanitize_flag("-g"), "-g");
         assert_eq!(sanitize_flag("-O2"), "-O2");
@@ -1488,21 +1584,21 @@ mod tests {
     fn test_get_clean_absolute_path() {
         let base = PathBuf::from("C:\\Project");
         let rel = Path::new("..\\Libs\\test.c");
-        
+
         let abs = get_clean_absolute_path(&base, rel);
         // 注意：这个函数的逻辑是纯路径计算，不依赖文件系统
         // C:\Project + ..\Libs\test.c -> C:\Libs\test.c
         let expected = PathBuf::from("C:\\Libs\\test.c");
-        
+
         assert_eq!(abs, expected);
-        
+
         // 测试绝对路径输入
         let base = PathBuf::from("C:\\Project");
         let rel = Path::new("C:\\Absolute\\Path\\file.c");
         let abs = get_clean_absolute_path(&base, rel);
         let expected = PathBuf::from("C:\\Absolute\\Path\\file.c");
         assert_eq!(abs, expected);
-        
+
         // 测试当前目录
         let base = PathBuf::from("C:\\Project");
         let rel = Path::new(".\\src\\main.c");
@@ -1510,7 +1606,7 @@ mod tests {
         let expected = PathBuf::from("C:\\Project\\src\\main.c");
         assert_eq!(abs, expected);
     }
-    
+
     #[test]
     fn test_find_common_ancestor() {
         let paths = vec![
@@ -1518,20 +1614,20 @@ mod tests {
             PathBuf::from("C:\\Proj\\src\\utils\\helper.c"),
             PathBuf::from("C:\\Proj\\drivers\\gpio.c"),
         ];
-        
+
         let ancestor = find_common_ancestor(&paths);
         assert_eq!(ancestor, PathBuf::from("C:\\Proj"));
-        
+
         // 测试空路径列表
         let paths: Vec<PathBuf> = vec![];
         let ancestor = find_common_ancestor(&paths);
         assert_eq!(ancestor, PathBuf::from("."));
-        
+
         // 测试单一路径
         let paths = vec![PathBuf::from("C:\\Proj\\src\\main.c")];
         let ancestor = find_common_ancestor(&paths);
         assert_eq!(ancestor, PathBuf::from("C:\\Proj\\src"));
-        
+
         // 测试不同盘符
         let paths = vec![
             PathBuf::from("C:\\Proj\\src\\main.c"),
@@ -1540,21 +1636,21 @@ mod tests {
         let ancestor = find_common_ancestor(&paths);
         assert_eq!(ancestor, PathBuf::from("."));
     }
-    
+
     #[test]
     fn test_normalize_path() {
         // 测试 UNC 路径修复
         let p = Path::new("\\\\?\\UNC\\Server\\Share\\File.c");
         assert_eq!(normalize_path(p), "\\\\Server\\Share\\File.c");
-        
+
         // 测试普通路径
         let p = Path::new("\\\\?\\C:\\Path\\File.c");
         assert_eq!(normalize_path(p), "C:\\Path\\File.c");
-        
+
         // 测试相对路径
         let p = Path::new("path/to/file");
         assert_eq!(normalize_path(p), "path\\to\\file");
-        
+
         // 测试 Windows 风格路径
         let p = Path::new("path\\to\\file");
         assert_eq!(normalize_path(p), "path\\to\\file");
@@ -1568,7 +1664,7 @@ mod tests {
         let abs = get_clean_absolute_path(&base, rel);
         let expected = PathBuf::from("C:\\Libs\\subdir\\test.c");
         assert_eq!(abs, expected);
-        
+
         // 测试根目录路径
         let base = PathBuf::from("C:\\Project");
         let rel = Path::new("\\Windows\\System32");
@@ -1631,8 +1727,8 @@ mod tests {
 
     #[test]
     fn test_variable_substitution_logic() {
-        use crate::models::SpecialFileBuildInfo;
         use crate::models::BuildTarget;
+        use crate::models::SpecialFileBuildInfo;
         use crate::parser::ProjectInfo;
 
         // 创建 BuildTarget
@@ -1653,16 +1749,15 @@ mod tests {
             global_linker_options: vec![],
             global_linker_lib_dirs: vec![],
             source_files: vec![],
-            special_files: vec![
-                SpecialFileBuildInfo {
-                    filename: "script.ld".to_string(),
-                    compiler_id: "gcc".to_string(),
-                    // 测试目标：验证 TARGET_OUTPUT_DIR 和 TARGET_OBJECT_DIR 是否被正确替换
-                    build_command: "cp $file $(TARGET_OUTPUT_DIR)\\ && echo $(TARGET_OBJECT_DIR)".to_string(),
-                    compile: true,
-                    link: false,
-                }
-            ],
+            special_files: vec![SpecialFileBuildInfo {
+                filename: "script.ld".to_string(),
+                compiler_id: "gcc".to_string(),
+                // 测试目标：验证 TARGET_OUTPUT_DIR 和 TARGET_OBJECT_DIR 是否被正确替换
+                build_command: "cp $file $(TARGET_OUTPUT_DIR)\\ && echo $(TARGET_OBJECT_DIR)"
+                    .to_string(),
+                compile: true,
+                link: false,
+            }],
             prebuild_commands: vec![],
             postbuild_commands: vec![],
             targets: vec![target],
@@ -1731,8 +1826,10 @@ mod tests {
     #[test]
     fn test_merge_clangd_config_no_extra_newlines() {
         // 测试场景：合并配置时不会产生多余的换行符
-        let existing_content = "CompileFlags:\n  Add:\n    - -Iexisting/path\n\nCompletion:\n  detailedLabels: false";
-        let new_compile_flags = "CompileFlags:\n  Add:\n    - -Inew/path\n    - -DNEW_FLAG\n    - -DMY_DEFINE";
+        let existing_content =
+            "CompileFlags:\n  Add:\n    - -Iexisting/path\n\nCompletion:\n  detailedLabels: false";
+        let new_compile_flags =
+            "CompileFlags:\n  Add:\n    - -Inew/path\n    - -DNEW_FLAG\n    - -DMY_DEFINE";
 
         let result = merge_clangd_config(existing_content, new_compile_flags);
 
@@ -1748,7 +1845,7 @@ mod tests {
         // 检查没有多余的换行符
         // 计算 CompileFlags 部分结束后到 Completion 部分开始前的换行符数量
         let mut newline_count = 0;
-        
+
         for line in result.lines() {
             if line.trim() == "" {
                 newline_count += 1;
@@ -1759,17 +1856,24 @@ mod tests {
                 newline_count = 0;
             }
         }
-        
+
         // 确保只有一个空行分隔 CompileFlags 和 Completion
-        assert_eq!(newline_count, 1, "Expected only one empty line between CompileFlags and Completion sections");
-        
+        assert_eq!(
+            newline_count, 1,
+            "Expected only one empty line between CompileFlags and Completion sections"
+        );
+
         // 确保文件中没有连续的多个空行
-        assert!(!result.contains("\n\n\n"), "Expected no more than two consecutive newlines in the result");
+        assert!(
+            !result.contains("\n\n\n"),
+            "Expected no more than two consecutive newlines in the result"
+        );
     }
 
     #[test]
     fn test_merge_clangd_config_no_existing_compile_flags() {
-        let existing_content = "Completion:\n  detailedLabels: true\n\nDiagnostics:\n  unusedIncludes: false";
+        let existing_content =
+            "Completion:\n  detailedLabels: true\n\nDiagnostics:\n  unusedIncludes: false";
         let new_compile_flags = "CompileFlags:\n  Add:\n    - -Inew/path";
 
         let result = merge_clangd_config(existing_content, new_compile_flags);

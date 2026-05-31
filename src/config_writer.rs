@@ -26,14 +26,12 @@ pub struct CompilerYamlConfig {
 
 /// 将 NAME 转换为 compiler_id：小写 + 连字符/空格 → 下划线
 pub fn name_to_compiler_id(name: &str) -> String {
-    name.to_lowercase()
-        .replace('-', "_")
-        .replace(' ', "_")
+    name.to_lowercase().replace('-', "_").replace(' ', "_")
 }
 
 /// 生成编译器条目的 XML 片段（匹配 default.conf 缩进风格）
 fn generate_entry_xml(entry: &CompilerYamlEntry, compiler_id: &str) -> String {
-    let t3 = "\t\t\t";   // entry 标签
+    let t3 = "\t\t\t"; // entry 标签
     let t4 = "\t\t\t\t"; // field 标签
     let t5 = "\t\t\t\t\t"; // <str>
     let t6 = "\t\t\t\t\t\t"; // CDATA
@@ -46,7 +44,14 @@ fn generate_entry_xml(entry: &CompilerYamlEntry, compiler_id: &str) -> String {
         ($tag:expr, $value:expr) => {
             format!(
                 "{}<{}>\n{}<str>\n{}{}\n{}</str>\n{}</{}>\n",
-                t4, $tag, t5, t6, cdata($value), t5, t4, $tag
+                t4,
+                $tag,
+                t5,
+                t6,
+                cdata($value),
+                t5,
+                t4,
+                $tag
             )
         };
     }
@@ -136,7 +141,10 @@ fn ensure_user_sets(content: &mut String) -> Option<usize> {
 
 /// 应用 YAML 配置到 default.conf 内容
 /// 返回修改后的内容
-pub fn apply_config_to_content(content: &str, config: &CompilerYamlConfig) -> Result<String, String> {
+pub fn apply_config_to_content(
+    content: &str,
+    config: &CompilerYamlConfig,
+) -> Result<String, String> {
     let mut result = content.to_string();
 
     for entry in &config.compilers {
@@ -150,9 +158,8 @@ pub fn apply_config_to_content(content: &str, config: &CompilerYamlConfig) -> Re
             println!("  Updated compiler '{}' (id={})", entry.name, compiler_id);
         } else {
             // 新增：插入到 <user_sets>
-            let insert_pos = ensure_user_sets(&mut result).ok_or_else(|| {
-                "Cannot find <sets> section in default.conf".to_string()
-            })?;
+            let insert_pos = ensure_user_sets(&mut result)
+                .ok_or_else(|| "Cannot find <sets> section in default.conf".to_string())?;
             result.insert_str(insert_pos, &entry_xml);
             println!("  Added compiler '{}' (id={})", entry.name, compiler_id);
         }
@@ -162,12 +169,15 @@ pub fn apply_config_to_content(content: &str, config: &CompilerYamlConfig) -> Re
 }
 
 /// 从 YAML 文件路径加载配置并应用到 default.conf
-pub fn apply_config_file(yaml_path: &std::path::Path, conf_path: &std::path::Path) -> Result<(), String> {
+pub fn apply_config_file(
+    yaml_path: &std::path::Path,
+    conf_path: &std::path::Path,
+) -> Result<(), String> {
     // 读取 YAML
     let yaml_content = std::fs::read_to_string(yaml_path)
         .map_err(|e| format!("Failed to read YAML file '{}': {}", yaml_path.display(), e))?;
-    let config: CompilerYamlConfig = serde_yaml::from_str(&yaml_content)
-        .map_err(|e| format!("Failed to parse YAML: {}", e))?;
+    let config: CompilerYamlConfig =
+        serde_yaml::from_str(&yaml_content).map_err(|e| format!("Failed to parse YAML: {}", e))?;
 
     if config.compilers.is_empty() {
         return Err("No compilers defined in YAML file".to_string());
@@ -182,7 +192,10 @@ pub fn apply_config_file(yaml_path: &std::path::Path, conf_path: &std::path::Pat
         return Err(format!("Invalid default.conf XML: {}", e));
     }
 
-    println!("Applying {} compiler configuration(s):", config.compilers.len());
+    println!(
+        "Applying {} compiler configuration(s):",
+        config.compilers.len()
+    );
 
     // 应用修改
     let new_content = apply_config_to_content(&conf_content, &config)?;

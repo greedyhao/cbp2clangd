@@ -39,8 +39,13 @@ pub struct CbCompilerConfig {
 /// 文件不存在时返回 None
 pub fn find_default_conf() -> Option<PathBuf> {
     let appdata = std::env::var("APPDATA").ok()?;
-    let path = PathBuf::from(appdata).join("CodeBlocks").join("default.conf");
-    debug_println!("[DEBUG cb_config] Looking for default.conf at: {}", path.display());
+    let path = PathBuf::from(appdata)
+        .join("CodeBlocks")
+        .join("default.conf");
+    debug_println!(
+        "[DEBUG cb_config] Looking for default.conf at: {}",
+        path.display()
+    );
     if path.exists() {
         debug_println!("[DEBUG cb_config] Found default.conf");
         Some(path)
@@ -75,7 +80,9 @@ pub fn find_default_conf() -> Option<PathBuf> {
 ///   </compiler>
 /// </CodeBlocksConfig>
 /// ```
-pub fn parse_default_conf(xml_content: &str) -> Result<CbCompilerConfig, Box<dyn std::error::Error>> {
+pub fn parse_default_conf(
+    xml_content: &str,
+) -> Result<CbCompilerConfig, Box<dyn std::error::Error>> {
     let doc = roxmltree::Document::parse(xml_content)?;
     let root = doc.root_element();
 
@@ -113,7 +120,10 @@ fn parse_compiler_sets(
     sets_tag: &str,
     compilers: &mut HashMap<String, CbCompilerEntry>,
 ) {
-    if let Some(sets_node) = compiler_node.children().find(|n| n.tag_name().name() == sets_tag) {
+    if let Some(sets_node) = compiler_node
+        .children()
+        .find(|n| n.tag_name().name() == sets_tag)
+    {
         for child in sets_node.children() {
             let tag = child.tag_name().name();
             // 跳过非编译器条目（如文本节点、set000 等）
@@ -144,17 +154,20 @@ fn parse_compiler_sets(
             );
 
             // <user_sets> 中的条目会覆盖 <sets> 中的同名条目
-            compilers.insert(compiler_id.clone(), CbCompilerEntry {
-                compiler_id,
-                name,
-                master_path,
-                c_compiler,
-                cpp_compiler,
-                linker,
-                lib_linker,
-                include_dirs,
-                library_dirs,
-            });
+            compilers.insert(
+                compiler_id.clone(),
+                CbCompilerEntry {
+                    compiler_id,
+                    name,
+                    master_path,
+                    c_compiler,
+                    cpp_compiler,
+                    linker,
+                    lib_linker,
+                    include_dirs,
+                    library_dirs,
+                },
+            );
         }
     }
 }
@@ -170,7 +183,9 @@ pub fn load_cb_compiler_config() -> Option<CbCompilerConfig> {
 /// 从 XML 节点提取 `<TAG><str><![CDATA[value]]></str></TAG>` 格式的字符串值
 fn extract_str_field(node: &roxmltree::Node, tag: &str) -> Option<String> {
     let field_node = node.children().find(|n| n.tag_name().name() == tag)?;
-    let str_node = field_node.children().find(|n| n.tag_name().name() == "str")?;
+    let str_node = field_node
+        .children()
+        .find(|n| n.tag_name().name() == "str")?;
     let text = str_node.text()?;
     let trimmed = text.trim();
     if trimmed.is_empty() {

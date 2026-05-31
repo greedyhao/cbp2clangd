@@ -2,12 +2,24 @@ use std::env;
 use std::fs;
 
 use cbp2clangd::{
-    Command, ToolchainConfig, ToolchainResolveError, compute_absolute_path, debug_println,
-    generate_build_script, generate_compile_commands, generate_ninja_build,
-    merge_compile_commands, parse_args, parse_cbp_file, set_debug_mode,
-    load_cb_compiler_config, find_default_conf, apply_config_file,
+    Command,
+    ToolchainConfig,
+    ToolchainResolveError,
+    apply_config_file,
+    compute_absolute_path,
+    debug_println,
+    find_default_conf,
+    generate_build_script,
     // 引入两个生成函数
-    generate_clangd_config, generate_clangd_fragment,
+    generate_clangd_config,
+    generate_clangd_fragment,
+    generate_compile_commands,
+    generate_ninja_build,
+    load_cb_compiler_config,
+    merge_compile_commands,
+    parse_args,
+    parse_cbp_file,
+    set_debug_mode,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -22,29 +34,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("cbp2clangd v{}", VERSION);
             Ok(())
         }
-        Command::ListCompilers => {
-            run_list_compilers()
-        }
-        Command::Convert(args) => {
-            run_convert(args)
-        }
-        Command::ApplyConfig(args) => {
-            run_apply_config(args)
-        }
+        Command::ListCompilers => run_list_compilers(),
+        Command::Convert(args) => run_convert(args),
+        Command::ApplyConfig(args) => run_apply_config(args),
         Command::MergeCompileCommands(args) => {
             // 设置调试模式
             set_debug_mode(args.debug);
             debug_println!("[DEBUG] Starting merge-compile-commands");
-            
+
             // 确保 output_dir 是绝对路径
             let workspace_root = compute_absolute_path(&args.output_dir)?;
             if !workspace_root.exists() {
                 fs::create_dir_all(&workspace_root)?;
             }
-            
+
             // 执行合并
             merge_compile_commands(&args.json_paths, &workspace_root)?;
-            
+
             Ok(())
         }
     }
@@ -158,7 +164,7 @@ fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::
 
     // 如果目录不存在，先创建 (为了安全起见，虽然 compute_absolute_path 不需要文件存在)
     if !workspace_root.exists() {
-         fs::create_dir_all(&workspace_root)?;
+        fs::create_dir_all(&workspace_root)?;
     };
 
     debug_println!("[DEBUG] Workspace Root: {}", workspace_root.display());
@@ -241,12 +247,18 @@ fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::
 
     // 解析工具链配置
     let toolchain = match cb_config.as_ref() {
-        Some(config) => match ToolchainConfig::resolve_toolchain(&project_info.compiler_id, config) {
+        Some(config) => match ToolchainConfig::resolve_toolchain(&project_info.compiler_id, config)
+        {
             Ok(config) => config,
-            Err(ToolchainResolveError::UnknownCompiler { compiler_id, available }) => {
+            Err(ToolchainResolveError::UnknownCompiler {
+                compiler_id,
+                available,
+            }) => {
                 eprintln!("Error: CBP 文件引用了未知的编译器 '{}'", compiler_id);
                 eprintln!("可用的编译器: {}", available.join(", "));
-                eprintln!("请在 Code::Blocks 中安装该编译器，或检查 CBP 文件的 <Option compiler=\"...\"> 设置");
+                eprintln!(
+                    "请在 Code::Blocks 中安装该编译器，或检查 CBP 文件的 <Option compiler=\"...\"> 设置"
+                );
                 return Err(format!("Unknown compiler: {}", compiler_id).into());
             }
         },
@@ -268,9 +280,7 @@ fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::
     // 检查编译器是否可用
     if !toolchain.is_compiler_available() {
         eprintln!("Error: Compiler not found at {}", toolchain.compiler_path());
-        eprintln!(
-            "Suggestion: The toolchain may not be installed or path is incorrect."
-        );
+        eprintln!("Suggestion: The toolchain may not be installed or path is incorrect.");
 
         // 为了让程序能够继续运行，即使编译器不可用，我们仍然生成配置文件
         // 但会使用一个合理的默认编译器名称而不是路径
@@ -295,11 +305,14 @@ fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::
 
     // 生成编译命令列表 - 使用第一个target
     debug_println!("[DEBUG] Generating compile commands...");
-    let first_target = project_info.targets.first()
+    let first_target = project_info
+        .targets
+        .first()
         .expect("No target available in project");
     debug_println!("[DEBUG] Using target: {}", first_target.name);
 
-    let compile_commands = generate_compile_commands(&project_info, &project_dir, &toolchain, Some(first_target));
+    let compile_commands =
+        generate_compile_commands(&project_info, &project_dir, &toolchain, Some(first_target));
     debug_println!(
         "[DEBUG] Compile commands generated: {}",
         compile_commands.len()
@@ -404,7 +417,7 @@ fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::
         &project_info,
         &project_dir,
         &workspace_root,
-        &abs_object_output
+        &abs_object_output,
     )?;
 
     // C. 读取并合并
@@ -420,12 +433,12 @@ fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::
     if existing_content.trim().is_empty() {
         // 新文件：处理 Completion 配置 + Fragment
         base_with_completion.push_str(&base_config);
-        
+
         // 如果需要，添加 Completion 配置
         if args.no_header_insertion {
             base_with_completion.push_str("\n\nCompletion:\n  HeaderInsertion: Never");
         }
-        
+
         final_parts.push(base_with_completion);
     } else {
         // 旧文件：使用新的合并逻辑，只替换 CompileFlags 部分，保留其他配置
@@ -437,13 +450,13 @@ fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::
         // 处理基本配置部分（第一部分）
         let base_part = parts[0];
         let merged_base_config = cbp2clangd::merge_clangd_config(base_part, &base_config);
-        
+
         // 检查现有内容是否已经包含 Completion 配置
         let has_completion = existing_content.contains("Completion:");
-        
+
         // 构建带有 Completion 配置的基本配置
         base_with_completion.push_str(&merged_base_config);
-        
+
         // 如果需要添加 Completion 配置且现有内容中没有，则添加
         if args.no_header_insertion && !has_completion {
             // 确保在适当的位置添加（在 CompileFlags 之后）
@@ -452,7 +465,7 @@ fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::
             }
             base_with_completion.push_str("\nCompletion:\n  HeaderInsertion: Never");
         }
-        
+
         final_parts.push(base_with_completion);
 
         // 处理片段部分（其余部分）
@@ -462,7 +475,10 @@ fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::
             if !trimmed_part.contains(&format!("PathMatch: {}", current_path_match)) {
                 final_parts.push(trimmed_part.to_string());
             } else {
-                debug_println!("[DEBUG] Replacing existing config for {}", current_path_match);
+                debug_println!(
+                    "[DEBUG] Replacing existing config for {}",
+                    current_path_match
+                );
             }
         }
     }
@@ -472,7 +488,11 @@ fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::
 
     // 写入
     fs::write(&clangd_path, final_parts.join("\n\n---\n"))?;
-    println!("Updated {} (Merged config for {})", clangd_path.display(), current_path_match);
+    println!(
+        "Updated {} (Merged config for {})",
+        clangd_path.display(),
+        current_path_match
+    );
 
     debug_println!("[DEBUG] Program completed successfully");
 

@@ -9,16 +9,19 @@ mod parser;
 mod utils;
 
 // 暴露需要访问的函数
-pub use cb_config::{CbCompilerConfig, CbCompilerEntry, load_cb_compiler_config, find_default_conf, parse_default_conf};
-pub use cli::{parse_args, Command, ConvertArgs, MergeCompileCommandsArgs, ApplyConfigArgs};
+pub use cb_config::{
+    CbCompilerConfig, CbCompilerEntry, find_default_conf, load_cb_compiler_config,
+    parse_default_conf,
+};
+pub use cli::{ApplyConfigArgs, Command, ConvertArgs, MergeCompileCommandsArgs, parse_args};
 pub use config::{ToolchainConfig, ToolchainResolveError};
-pub use config_writer::{apply_config_file, CompilerYamlConfig};
+pub use config_writer::{CompilerYamlConfig, apply_config_file};
 pub use generator::{
-    generate_build_script, generate_clangd_config, generate_clangd_fragment, generate_compile_commands, generate_ninja_build,
-    merge_clangd_config, merge_compile_commands,
+    generate_build_script, generate_clangd_config, generate_clangd_fragment,
+    generate_compile_commands, generate_ninja_build, merge_clangd_config, merge_compile_commands,
 };
 pub use parser::parse_cbp_file;
-pub use utils::is_debug_mode;
-pub use utils::set_debug_mode;
 pub use utils::compute_absolute_path;
 pub use utils::get_clean_absolute_path;
+pub use utils::is_debug_mode;
+pub use utils::set_debug_mode;
