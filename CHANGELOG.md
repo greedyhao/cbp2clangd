@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-05-31
+
+### Added
+- 新增 `--list-compilers` 参数，列出 Code::Blocks `default.conf` 中所有已注册的编译器配置（compiler_id、NAME、MASTER_PATH、C_COMPILER、CPP_COMPILER、LINKER、LIB_LINKER）
+- 新增 `apply-config <config.yaml>` 子命令，通过 YAML 文件添加或更新 Code::Blocks 编译器配置
+  - compiler_id 由 NAME 自动生成（小写 + 连字符/空格 → 下划线）
+  - 已有条目自动更新，新条目插入到 `<user_sets>` 中
+  - 未指定 parent 时默认 `gcc`
+  - 修改前自动备份 `default.conf` 为 `.conf.bak`
+- 新增 `CbCompilerEntry` 字段：`name`、`c_compiler`、`cpp_compiler`、`linker`、`lib_linker`，完整支持 Code::Blocks 工具链配置读取
+- `parse_cbp_file` 新增 `cb_config` 参数，用于 ExtraCommands 中 `$compiler` 宏的正确替换
+
+### Changed
+- **重构工具链路径解析**：移除所有 hardcoded RISC-V 回退逻辑（`version_name`、`gcc_version`、`get_hardcoded_defaults`、`derive_version_name` 全部删除）
+  - `ToolchainConfig::toolchain_base_path` 改为必填 `String`，来源仅为 `default.conf` 的 `MASTER_PATH`
+  - `resolve_toolchain()` 要求提供 `&CbCompilerConfig`，找不到编译器直接报错
+  - `compiler_path()`/`linker_path()`/`ar_path()` 改用 `C_COMPILER`/`LINKER`/`LIB_LINKER` 字段，不再硬编码 `riscv32-elf-*` 前缀
+  - `include_paths()` 改为仅返回 `cb_include_dirs`（调用方添加 `-I`），修复双 `-I` 前缀 bug
+- **编译器 ID 匹配**：`resolve_toolchain` 新增不区分大小写的 `<NAME>` 字段匹配，支持 `RISCV32-V2` 匹配 XML 标签 `riscv32_v2`
+- generator 中所有 `riscv32-elf-gcc`/`riscv32-elf-ld`/`riscv32-elf-ar` 硬编码占位符改为从路径提取文件名
+
+### Fixed
+- `include_paths()` 中 `cb_include_dirs` 被添加两次 `-I` 前缀的问题
+- 解析器 `parse_cbp_file` 中工具链不在 hardcoded 列表时会错误回退到 `riscv32-v2` 的问题
+
 ## [1.4.1] - 2026-04-30
 ### Fixed
 - 修复 RISC-V `-march=` 自定义扩展检测：标准扩展中的 `x`（如 `_zfinx`）不再被误判为自定义扩展
