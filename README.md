@@ -83,6 +83,24 @@ cbp2clangd --list-compilers
 
 - `--list-compilers`: 列出 Code::Blocks 中已注册的所有编译器配置，包括 compiler_id、NAME、MASTER_PATH、C_COMPILER、CPP_COMPILER、LINKER、LIB_LINKER 等字段
 
+#### 应用 YAML 配置命令
+
+- `apply-config <config.yaml>`: 通过 YAML 文件添加或更新 Code::Blocks 编译器配置
+
+YAML 格式示例：
+```yaml
+compilers:
+  - name: "RISCV32-V4"              # 编译器显示名称，会自动转为 compiler_id (小写+下划线)
+    master_path: "C:\\toolchain\\v4"  # 工具链安装路径
+    c_compiler: "riscv32-elf-gcc.exe" # C 编译器（可选）
+    cpp_compiler: "riscv32-elf-g++.exe" # C++ 编译器（可选）
+    linker: "riscv32-elf-ld.exe"      # 链接器（可选）
+    lib_linker: "riscv32-elf-ar.exe"  # 库管理器（可选）
+    parent: "gcc"                    # 父编译器（可选，默认 gcc）
+```
+
+已有配置会更新，新配置会自动添加到 `<user_sets>` 中。原 `default.conf` 会自动备份为 `.conf.bak`。
+
 ### 查看版本信息
 
 ```bash

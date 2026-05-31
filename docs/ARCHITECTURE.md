@@ -304,7 +304,65 @@ pub struct CbCompilerConfig {
 
 ---
 
-### 3.5 config.rs - 工具链配置
+### 3.5 config_writer.rs - 编译器配置写入
+
+**职责**: 通过 YAML 配置文件添加或更新 Code::Blocks `default.conf` 中的编译器条目。
+
+**YAML 格式**:
+
+```yaml
+compilers:
+  - name: "RISCV32-V4"               # → compiler_id: riscv32_v4
+    master_path: "C:\\toolchain\\v4"
+    c_compiler: "riscv32-elf-gcc.exe"   # 可选
+    cpp_compiler: "riscv32-elf-g++.exe" # 可选
+    linker: "riscv32-elf-ld.exe"        # 可选
+    lib_linker: "riscv32-elf-ar.exe"    # 可选
+    parent: "gcc"                       # 可选，默认 gcc
+```
+
+**核心函数**:
+
+| 函数 | 说明 |
+|------|------|
+| `name_to_compiler_id(name)` | NAME → compiler_id：小写 + 连字符/空格 → 下划线 |
+| `generate_entry_xml(entry, id)` | 生成匹配 `default.conf` 缩进风格的 XML 片段（含 CDATA） |
+| `find_entry_in_content(content, id)` | 在文本中查找已有条目位置 |
+| `ensure_user_sets(content)` | 确保 `<user_sets>` 标签存在并返回插入点 |
+| `apply_config_to_content(content, config)` | 将 YAML 配置应用到文本内容（更新或插入） |
+| `apply_config_file(yaml_path, conf_path)` | 完整流程：读取 YAML → 解析/备份/修改/写回 `default.conf` |
+
+**工作流程**:
+
+```
+apply-config <config.yaml>
+    │
+    ▼
+┌─────────────────────────┐
+│ 读取 YAML               │
+│ 解析配置列表             │
+└──────────┬──────────────┘
+           ▼
+┌─────────────────────────┐
+│ 对每个配置项:            │
+│ 1. name → compiler_id   │
+│ 2. 生成 XML 片段         │
+│ 3. 在 default.conf 中    │
+│    查找 compiler_id      │
+│    ├─ 存在 → 替换条目     │
+│    └─ 不存在 → 插入到     │
+│        <user_sets> 中    │
+└──────────┬──────────────┘
+           ▼
+┌─────────────────────────┐
+│ 验证 XML 合法性           │
+│ 备份 → 写回 default.conf │
+└─────────────────────────┘
+```
+
+---
+
+### 3.6 config.rs - 工具链配置
 
 **职责**: 根据 compiler_id 从 `default.conf` 解析工具链路径，构造 C/C++ 编译器、链接器和库管理器的完整路径。
 
@@ -409,7 +467,7 @@ pub enum ToolchainResolveError {
 
 ---
 
-### 3.6 utils.rs - 工具函数
+### 3.7 utils.rs - 工具函数
 
 **职责**: 提供路径处理和 Windows API 调用等工具函数
 
@@ -425,7 +483,7 @@ pub enum ToolchainResolveError {
 
 ---
 
-### 3.7 models.rs - 数据模型
+### 3.8 models.rs - 数据模型
 
 **职责**: 定义项目中使用的核心数据结构
 
@@ -585,6 +643,8 @@ main.rs
   │
   ├─► config.rs (ToolchainConfig::resolve_toolchain)
   │
+  ├─► config_writer.rs (apply_config_file)
+  │
   └─► generator.rs
           │
           ├─► parser.rs (ProjectInfo)
@@ -613,6 +673,10 @@ config.rs
   ├─► cb_config.rs (CbCompilerConfig)
   │
   └─► utils.rs (debug_println!)
+
+config_writer.rs
+  │
+  └─► (文本操作 default.conf)
 
 utils.rs
   │
@@ -659,6 +723,29 @@ cbp2clangd merge-compile-commands [--json] <file1> <file2> ... [OPTIONS]
 **CBP 模式**（默认）：输入 `.cbp` 文件，工具自动从 CBP 的 target 配置中定位 `compile_commands.json` 路径并进行合并。非 `.cbp` 文件会报错退出。
 
 **JSON 模式**（`--json`）：输入文件直接作为 `compile_commands.json` 路径，合并结果写入第一个 JSON 文件，`.clangd` 写入其父目录。此模式下不允许使用 `--output-dir`。
+
+### 6.3 应用编译器配置
+
+```bash
+cbp2clangd apply-config <config.yaml>
+```
+
+通过 YAML 文件添加或更新 Code::Blocks 的 `default.conf` 中的编译器条目。
+
+```yaml
+compilers:
+  - name: "RISCV32-V4"
+    master_path: "C:\\toolchain\\v4"
+    c_compiler: "riscv32-elf-gcc.exe"
+    cpp_compiler: "riscv32-elf-g++.exe"
+    linker: "riscv32-elf-ld.exe"
+    lib_linker: "riscv32-elf-ar.exe"
+    parent: "gcc"
+```
+
+- compiler_id 由 `name` 自动生成：小写 + 连字符/空格 → 下划线（如 `RISCV32-V4` → `riscv32_v4`）
+- 已有配置更新，新配置插入到 `<user_sets>` 中
+- 原 `default.conf` 自动备份为 `.conf.bak`
 
 ---
 

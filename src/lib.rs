@@ -2,6 +2,7 @@
 mod cb_config;
 mod cli;
 mod config;
+mod config_writer;
 mod generator;
 mod models;
 mod parser;
@@ -9,8 +10,9 @@ mod utils;
 
 // 暴露需要访问的函数
 pub use cb_config::{CbCompilerConfig, CbCompilerEntry, load_cb_compiler_config, find_default_conf, parse_default_conf};
-pub use cli::{parse_args, Command, ConvertArgs, MergeCompileCommandsArgs};
+pub use cli::{parse_args, Command, ConvertArgs, MergeCompileCommandsArgs, ApplyConfigArgs};
 pub use config::{ToolchainConfig, ToolchainResolveError};
+pub use config_writer::{apply_config_file, CompilerYamlConfig};
 pub use generator::{
     generate_build_script, generate_clangd_config, generate_clangd_fragment, generate_compile_commands, generate_ninja_build,
     merge_clangd_config, merge_compile_commands,

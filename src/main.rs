@@ -5,7 +5,7 @@ use cbp2clangd::{
     Command, ToolchainConfig, ToolchainResolveError, compute_absolute_path, debug_println,
     generate_build_script, generate_compile_commands, generate_ninja_build,
     merge_compile_commands, parse_args, parse_cbp_file, set_debug_mode,
-    load_cb_compiler_config, find_default_conf,
+    load_cb_compiler_config, find_default_conf, apply_config_file,
     // 引入两个生成函数
     generate_clangd_config, generate_clangd_fragment,
 };
@@ -28,6 +28,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Convert(args) => {
             run_convert(args)
         }
+        Command::ApplyConfig(args) => {
+            run_apply_config(args)
+        }
         Command::MergeCompileCommands(args) => {
             // 设置调试模式
             set_debug_mode(args.debug);
@@ -45,6 +48,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
     }
+}
+
+fn run_apply_config(args: cbp2clangd::ApplyConfigArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let conf_path = find_default_conf().ok_or_else(|| {
+        eprintln!("Error: Code::Blocks default.conf not found.");
+        eprintln!("Expected at: %APPDATA%/CodeBlocks/default.conf");
+        "default.conf not found"
+    })?;
+
+    println!("Config file: {}", conf_path.display());
+    println!("YAML file: {}", args.yaml_path.display());
+
+    apply_config_file(&args.yaml_path, &conf_path)?;
+
+    println!("Done.");
+    Ok(())
 }
 
 fn run_list_compilers() -> Result<(), Box<dyn std::error::Error>> {

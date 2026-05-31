@@ -21,6 +21,11 @@ pub struct MergeCompileCommandsArgs {
     pub debug: bool,
 }
 
+/// 应用 YAML 编译器配置命令参数
+pub struct ApplyConfigArgs {
+    pub yaml_path: PathBuf,
+}
+
 /// 命令行命令枚举
 pub enum Command {
     /// 显示版本信息
@@ -31,6 +36,8 @@ pub enum Command {
     Convert(ConvertArgs),
     /// 合并多个 compile_commands.json
     MergeCompileCommands(MergeCompileCommandsArgs),
+    /// 通过 YAML 文件修改 Code::Blocks 编译器配置
+    ApplyConfig(ApplyConfigArgs),
 }
 
 /// 解析命令行参数
@@ -57,6 +64,11 @@ pub fn parse_args() -> Result<Command, Box<dyn std::error::Error>> {
     // 检查是否请求列出编译器配置
     if args.len() == 2 && args[1] == "--list-compilers" {
         return Ok(Command::ListCompilers);
+    }
+
+    // 检查是否是 apply-config 子命令
+    if args.len() >= 2 && args[1] == "apply-config" {
+        return parse_apply_config(args);
     }
 
     // 检查是否是 merge-compile-commands 子命令
@@ -212,6 +224,53 @@ fn parse_merge_compile_commands(
     }))
 }
 
+/// 解析 apply-config 子命令
+fn parse_apply_config(
+    mut args: Vec<String>,
+) -> Result<Command, Box<dyn std::error::Error>> {
+    let program_name = args[0].clone();
+
+    // 移除子命令名（索引 1）
+    args.remove(1);
+    // 移除程序名
+    args.remove(0);
+
+    if args.len() != 1 {
+        eprintln!("Error: apply-config requires exactly one YAML file argument");
+        eprintln!();
+        print_apply_config_usage(&program_name);
+        std::process::exit(1);
+    }
+
+    let yaml_path = PathBuf::from(&args[0]);
+    if !yaml_path.exists() {
+        eprintln!("Error: YAML file not found: {}", yaml_path.display());
+        std::process::exit(1);
+    }
+
+    Ok(Command::ApplyConfig(ApplyConfigArgs { yaml_path }))
+}
+
+/// 打印 apply-config 的使用说明
+fn print_apply_config_usage(program: &str) {
+    eprintln!("Usage: {} apply-config <config.yaml>", program);
+    eprintln!();
+    eprintln!("Apply a YAML compiler configuration to Code::Blocks default.conf");
+    eprintln!();
+    eprintln!("YAML format:");
+    eprintln!("  compilers:");
+    eprintln!("    - name: \"Compiler Display Name\"");
+    eprintln!("      master_path: \"C:\\path\\to\\toolchain\"");
+    eprintln!("      c_compiler: \"gcc.exe\"         # optional");
+    eprintln!("      cpp_compiler: \"g++.exe\"        # optional");
+    eprintln!("      linker: \"ld.exe\"               # optional");
+    eprintln!("      lib_linker: \"ar.exe\"            # optional");
+    eprintln!("      parent: \"gcc\"                  # optional, default: gcc");
+    eprintln!();
+    eprintln!("Compiler ID is auto-generated from name: lowercase with underscores.");
+    eprintln!("Existing entries are updated; new entries are added to <user_sets>.");
+}
+
 /// 解析 convert 命令（原有逻辑）
 fn parse_convert(
     mut args: Vec<String>,
@@ -344,6 +403,7 @@ fn print_convert_usage(program: &str) {
     eprintln!("Usage:");
     eprintln!("  {} [OPTIONS] <project.cbp> [output_dir]", program);
     eprintln!("  {} merge-compile-commands [--json] <file1> <file2> ... [--output-dir <dir>] [--debug]", program);
+    eprintln!("  {} apply-config <config.yaml>", program);
     eprintln!("  {} --list-compilers", program);
     eprintln!("  {} --version | -v", program);
     eprintln!();
@@ -352,6 +412,8 @@ fn print_convert_usage(program: &str) {
     eprintln!("                            Merge multiple compile_commands.json files from CBP projects,"
     );
     eprintln!("                            or from JSON files directly with --json flag");
+    eprintln!("  apply-config <config.yaml>");
+    eprintln!("                            Apply YAML compiler configuration to Code::Blocks default.conf");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  --debug                  Enable debug logging");
