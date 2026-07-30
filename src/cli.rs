@@ -12,6 +12,7 @@ pub struct ConvertArgs {
     pub test_mode: bool,
     pub ninja_path: Option<String>,
     pub no_header_insertion: bool,
+    pub target: Option<String>,
 }
 
 /// 合并 compile_commands.json 命令参数
@@ -307,6 +308,20 @@ fn parse_convert(
         }
     }
 
+    // 检查并移除 --target 参数
+    let mut target = None;
+    if let Some(target_pos) = args.iter().position(|arg| arg == "--target") {
+        if target_pos + 1 < args.len() {
+            target = Some(args[target_pos + 1].clone());
+            args.remove(target_pos + 1);
+            args.remove(target_pos);
+        } else {
+            eprintln!("Error: --target requires a target name");
+            print_convert_usage(&program_name);
+            std::process::exit(1);
+        }
+    }
+
     // 检查并移除--ninja/-n参数
     let mut ninja_path = None;
     if let Some(ninja_pos) = args.iter().position(|arg| arg == "--ninja" || arg == "-n") {
@@ -331,6 +346,7 @@ fn parse_convert(
             test_mode: true,
             ninja_path,
             no_header_insertion: false,
+            target,
         }));
     }
 
@@ -382,6 +398,7 @@ fn parse_convert(
         test_mode: false,
         ninja_path,
         no_header_insertion,
+        target,
     }))
 }
 
@@ -434,6 +451,7 @@ fn print_convert_usage(program: &str) {
     eprintln!("  --no-header-insertion    Disable header insertion in clangd completion");
     eprintln!("  --linker <type>          Specify linker type (gcc or ld)");
     eprintln!("  -l <type>                Short form for --linker");
+    eprintln!("  --target <name>          Select the Code::Blocks build target");
     eprintln!("  --ninja <path>           Specify custom ninja executable path");
     eprintln!("  -n <path>                Short form for --ninja");
     eprintln!(

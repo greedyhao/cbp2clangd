@@ -162,6 +162,15 @@ pub fn parse_cbp_file(
                 if let Some(output) = option_node.attribute("output") {
                     target.output = output.to_string();
                 }
+                if let Some(working_dir) = option_node.attribute("working_dir") {
+                    target.working_dir = working_dir.to_string();
+                }
+                if let Some(target_type) = option_node.attribute("type") {
+                    target.target_type = Some(target_type.to_string());
+                }
+                if let Some(compiler_id) = option_node.attribute("compiler") {
+                    target.compiler_id = Some(compiler_id.to_string());
+                }
                 if let Some(obj_output) = option_node.attribute("object_output") {
                     target.object_output = obj_output.to_string();
                 }
@@ -211,6 +220,47 @@ pub fn parse_cbp_file(
                     }
                     if let Some(dir) = add.attribute("directory") {
                         target.linker_lib_dirs.push(format!("-L{}", dir));
+                    }
+                }
+            }
+
+            // 展开 Target 级命令，并处理 Code::Blocks 常用 Target 宏。
+            let target_output_dir = Path::new(&target.output)
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .to_string_lossy()
+                .to_string();
+            let target_object_dir = target.object_output.clone();
+            let expand_target_macros = |value: &str| {
+                value
+                    .replace("$(TARGET_NAME)", &target.name)
+                    .replace("$(TARGET_OUTPUT_DIR)", &target_output_dir)
+                    .replace("$(TARGET_OBJECT_DIR)", &target_object_dir)
+            };
+            target.output = expand_target_macros(&target.output);
+            target.object_output = expand_target_macros(&target.object_output);
+
+            if let Some(extra_commands) = target_node
+                .children()
+                .find(|n| n.tag_name().name() == "ExtraCommands")
+            {
+                for add in extra_commands
+                    .children()
+                    .filter(|n| n.tag_name().name() == "Add")
+                {
+                    if let Some(before) = add.attribute("before") {
+                        if !before.trim().is_empty() {
+                            target
+                                .prebuild_commands
+                                .push(expand_target_macros(before.trim()));
+                        }
+                    }
+                    if let Some(after) = add.attribute("after") {
+                        if !after.trim().is_empty() {
+                            target
+                                .postbuild_commands
+                                .push(expand_target_macros(after.trim()));
+                        }
                     }
                 }
             }
@@ -487,14 +537,19 @@ fn process_library_path(lib: &str) -> String {
         // 带路径的库，直接使用完整路径
         lib.to_string()
     } else {
-        // 不带路径的库，处理前缀
-        if lib.starts_with("lib") {
-            // 去掉lib前缀，添加-l
-            format!("-l{}", &lib[3..])
-        } else {
-            // 直接添加-l
-            format!("-l{}", lib)
+        // 不带路径的库使用 -l<name>。GCC/LD 会自动补齐 lib 前缀和 .a 后缀，
+        // 因此这里必须移除输入中可能已经存在的这两部分。
+        let mut name = lib;
+        if let Some(stripped) = name.strip_prefix("-l") {
+            name = stripped;
         }
+        if let Some(stripped) = name.strip_prefix("lib") {
+            name = stripped;
+        }
+        if let Some(stripped) = name.strip_suffix(".a") {
+            name = stripped;
+        }
+        format!("-l{}", name)
     }
 }
 

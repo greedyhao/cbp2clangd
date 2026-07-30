@@ -289,3 +289,98 @@ fn test_special_files_as_implicit_deps() {
         "链接规则应该包含普通源文件的目标文件"
     );
 }
+
+#[test]
+fn test_generate_ninja_build_for_target_with_extra_commands() {
+    use cbp2clangd::{generate_build_script_for_target, generate_ninja_build_for_target};
+    let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<CodeBlocks_project_file>
+    <FileVersion major="1" minor="6" />
+    <Project>
+        <Option title="stack" />
+        <Build>
+            <Target title="Debug">
+                <Option output="Output/$(TARGET_NAME)/bin/stack.a" prefix_auto="1" extension_auto="0" />
+                <Option object_output="Output/$(TARGET_NAME)/obj/" />
+                <Compiler>
+                    <Add option="-DBT_ACL_NUM=2" />
+                </Compiler>
+                <ExtraCommands>
+                    <Add after="Output\$(TARGET_NAME)\bin\postbuild.bat" />
+                </ExtraCommands>
+            </Target>
+            <Target title="Debug_1to3">
+                <Option output="Output/$(TARGET_NAME)/bin/stack_1to3.a" prefix_auto="1" extension_auto="0" />
+                <Option object_output="Output/$(TARGET_NAME)/obj/" />
+                <Compiler>
+                    <Add option="-DBT_ACL_NUM=3" />
+                </Compiler>
+            </Target>
+        </Build>
+        <Unit filename="src/main.c">
+            <Option compile="1" />
+        </Unit>
+    </Project>
+</CodeBlocks_project_file>"#;
+
+    let project_info = parse_cbp_file(xml_content, None).unwrap();
+    let toolchain = test_toolchain();
+    let target = project_info
+        .targets
+        .iter()
+        .find(|t| t.name == "Debug_1to3")
+        .unwrap();
+
+    let ninja =
+        generate_ninja_build_for_target(&project_info, Path::new("."), &toolchain, Some(target))
+            .unwrap();
+    // Ninja 应使用 Debug_1to3 的输出和宏
+    assert!(
+        ninja.contains("stack_1to3"),
+        "ninja 应包含 Debug_1to3 的输出名"
+    );
+    assert!(
+        ninja.contains("-DBT_ACL_NUM=3"),
+        "ninja 应包含 Debug_1to3 的宏"
+    );
+    assert!(
+        !ninja.contains("$(TARGET_NAME)"),
+        "ninja 不应残留 $(TARGET_NAME)"
+    );
+
+    let script = generate_build_script_for_target(
+        &project_info,
+        &toolchain,
+        Path::new("."),
+        None,
+        Some(target),
+    );
+    // Debug_1to3 没有声明 Target 级 ExtraCommands，应回退到 Project 级（这里为空），
+    // 不应误用 Debug 的 postbuild 命令
+    assert!(
+        !script.contains("postbuild.bat"),
+        "build.bat 不应包含其他 Target 的 postbuild"
+    );
+
+    // Debug Target 的 build.bat 应包含其 postbuild 命令
+    let debug_target = project_info
+        .targets
+        .iter()
+        .find(|t| t.name == "Debug")
+        .unwrap();
+    let debug_script = generate_build_script_for_target(
+        &project_info,
+        &toolchain,
+        Path::new("."),
+        None,
+        Some(debug_target),
+    );
+    assert!(
+        debug_script.contains("postbuild.bat"),
+        "Debug 的 build.bat 应包含 postbuild"
+    );
+    assert!(
+        debug_script.contains(r"Debug\bin\postbuild.bat"),
+        "postbuild 路径中应展开 $(TARGET_NAME) 为 Debug"
+    );
+}

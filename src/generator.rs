@@ -66,10 +66,19 @@ pub fn generate_clangd_config(
     toolchain: &ToolchainConfig,
     _no_header_insertion: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    generate_clangd_config_for_target(project_info, toolchain, _no_header_insertion, None)
+}
+
+pub fn generate_clangd_config_for_target(
+    project_info: &ProjectInfo,
+    toolchain: &ToolchainConfig,
+    _no_header_insertion: bool,
+    selected_target: Option<&crate::models::BuildTarget>,
+) -> Result<String, Box<dyn std::error::Error>> {
     debug_println!("[DEBUG generator] Starting to generate .clangd config...");
 
     // 使用第一个target，如果没有则使用默认值
-    let target = project_info.targets.first();
+    let target = selected_target.or_else(|| project_info.targets.first());
 
     debug_println!("[DEBUG generator] Getting include paths from toolchain...");
     let includes = toolchain
@@ -224,6 +233,16 @@ pub fn generate_clangd_fragment(
     workspace_root: &Path, // .clangd 根目录
     _db_path: &Path,       // compile_commands.json 目录 (现在使用target特定的路径)
 ) -> Result<(String, String), Box<dyn std::error::Error>> {
+    generate_clangd_fragment_for_target(project_info, project_dir, workspace_root, _db_path, None)
+}
+
+pub fn generate_clangd_fragment_for_target(
+    project_info: &ProjectInfo,
+    project_dir: &Path,
+    workspace_root: &Path,
+    _db_path: &Path,
+    selected_target: Option<&crate::models::BuildTarget>,
+) -> Result<(String, String), Box<dyn std::error::Error>> {
     debug_println!("[DEBUG generator] Generating clangd fragment...");
 
     // 1. 计算 PathMatch (基于源文件共同祖先)
@@ -257,7 +276,7 @@ pub fn generate_clangd_fragment(
     };
 
     // 2. CompilationDatabase (使用第一个target的object_output，转为正斜杠)
-    let db_path = if let Some(target) = project_info.targets.first() {
+    let db_path = if let Some(target) = selected_target.or_else(|| project_info.targets.first()) {
         let obj_output_path = project_dir.join(&target.object_output);
         obj_output_path.to_string_lossy().replace("\\", "/")
     } else {
@@ -587,10 +606,21 @@ pub fn generate_ninja_build(
     project_dir: &Path,
     toolchain: &ToolchainConfig,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    generate_ninja_build_for_target(project_info, project_dir, toolchain, None)
+}
+
+pub fn generate_ninja_build_for_target(
+    project_info: &ProjectInfo,
+    project_dir: &Path,
+    toolchain: &ToolchainConfig,
+    selected_target: Option<&crate::models::BuildTarget>,
+) -> Result<String, Box<dyn std::error::Error>> {
     debug_println!("[DEBUG generator] Starting to generate ninja build file...");
 
     // 获取要使用的target
-    let target = project_info.targets.first().expect("No target available");
+    let target = selected_target
+        .or_else(|| project_info.targets.first())
+        .expect("No target available");
 
     debug_println!(
         "[DEBUG generator] Generating ninja build for target: {}",
@@ -1328,7 +1358,39 @@ pub fn generate_build_script(
     _project_dir: &Path,
     ninja_path: Option<&str>,
 ) -> String {
+    generate_build_script_for_target(project_info, toolchain, _project_dir, ninja_path, None)
+}
+
+pub fn generate_build_script_for_target(
+    project_info: &ProjectInfo,
+    toolchain: &ToolchainConfig,
+    _project_dir: &Path,
+    ninja_path: Option<&str>,
+    selected_target: Option<&crate::models::BuildTarget>,
+) -> String {
     debug_println!("[DEBUG generator] Starting to generate build script...");
+
+    // 选中 Target 的 pre/post commands 优先于 Project 级别的命令，
+    // 因为 Target 级别的命令已经处理过 $(TARGET_NAME) 等宏替换。
+    let target = selected_target.or_else(|| project_info.targets.first());
+    let prebuild_commands: Vec<&String> = if let Some(target) = target {
+        if target.prebuild_commands.is_empty() {
+            project_info.prebuild_commands.iter().collect()
+        } else {
+            target.prebuild_commands.iter().collect()
+        }
+    } else {
+        project_info.prebuild_commands.iter().collect()
+    };
+    let postbuild_commands: Vec<&String> = if let Some(target) = target {
+        if target.postbuild_commands.is_empty() {
+            project_info.postbuild_commands.iter().collect()
+        } else {
+            target.postbuild_commands.iter().collect()
+        }
+    } else {
+        project_info.postbuild_commands.iter().collect()
+    };
 
     let mut script_content = String::new();
 
@@ -1344,9 +1406,9 @@ pub fn generate_build_script(
     script_content.push_str("\n");
 
     // 2. 添加预构建命令
-    if !project_info.prebuild_commands.is_empty() {
+    if !prebuild_commands.is_empty() {
         script_content.push_str("rem Prebuild commands\n");
-        for cmd in &project_info.prebuild_commands {
+        for cmd in &prebuild_commands {
             script_content.push_str("pushd %~dp0\n");
             let processed_cmd = cmd.replace("$(PROJECT_NAME)", &project_info.project_name);
             script_content.push_str(&format!("call {}\n", processed_cmd));
@@ -1366,9 +1428,9 @@ pub fn generate_build_script(
     script_content.push_str("\n");
 
     // 4. 添加后构建命令
-    if !project_info.postbuild_commands.is_empty() {
+    if !postbuild_commands.is_empty() {
         script_content.push_str("rem Postbuild commands\n");
-        for cmd in &project_info.postbuild_commands {
+        for cmd in &postbuild_commands {
             script_content.push_str("pushd %~dp0\n");
             let processed_cmd = cmd.replace("$(PROJECT_NAME)", &project_info.project_name);
             script_content.push_str(&format!("call {}\n", processed_cmd));

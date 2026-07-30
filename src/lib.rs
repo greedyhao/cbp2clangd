@@ -17,8 +17,10 @@ pub use cli::{ApplyConfigArgs, Command, ConvertArgs, MergeCompileCommandsArgs, p
 pub use config::{ToolchainConfig, ToolchainResolveError};
 pub use config_writer::{CompilerYamlConfig, apply_config_file};
 pub use generator::{
-    generate_build_script, generate_clangd_config, generate_clangd_fragment,
-    generate_compile_commands, generate_ninja_build, merge_clangd_config, merge_compile_commands,
+    generate_build_script, generate_build_script_for_target, generate_clangd_config,
+    generate_clangd_config_for_target, generate_clangd_fragment,
+    generate_clangd_fragment_for_target, generate_compile_commands, generate_ninja_build,
+    generate_ninja_build_for_target, merge_clangd_config, merge_compile_commands,
 };
 pub use parser::parse_cbp_file;
 pub use utils::compute_absolute_path;

@@ -2,24 +2,11 @@ use std::env;
 use std::fs;
 
 use cbp2clangd::{
-    Command,
-    ToolchainConfig,
-    ToolchainResolveError,
-    apply_config_file,
-    compute_absolute_path,
-    debug_println,
-    find_default_conf,
-    generate_build_script,
-    // 引入两个生成函数
-    generate_clangd_config,
-    generate_clangd_fragment,
-    generate_compile_commands,
-    generate_ninja_build,
-    load_cb_compiler_config,
-    merge_compile_commands,
-    parse_args,
-    parse_cbp_file,
-    set_debug_mode,
+    Command, ToolchainConfig, ToolchainResolveError, apply_config_file, compute_absolute_path,
+    debug_println, find_default_conf, generate_build_script_for_target,
+    generate_clangd_config_for_target, generate_clangd_fragment_for_target,
+    generate_compile_commands, generate_ninja_build_for_target, load_cb_compiler_config,
+    merge_compile_commands, parse_args, parse_cbp_file, set_debug_mode,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -303,23 +290,47 @@ fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::
     };
     debug_println!("[DEBUG] Project directory: {}", project_dir.display());
 
-    // 生成编译命令列表 - 使用第一个target
+    // 生成编译命令列表 - 使用指定 target，未指定时使用第一个
     debug_println!("[DEBUG] Generating compile commands...");
-    let first_target = project_info
-        .targets
-        .first()
-        .expect("No target available in project");
-    debug_println!("[DEBUG] Using target: {}", first_target.name);
+    let selected_target = args
+        .target
+        .as_deref()
+        .map(|name| {
+            project_info
+                .targets
+                .iter()
+                .find(|target| target.name == name)
+                .ok_or_else(|| {
+                    format!(
+                        "Target '{}' not found. Available targets: {}",
+                        name,
+                        project_info
+                            .targets
+                            .iter()
+                            .map(|target| target.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                })
+        })
+        .transpose()?
+        .or_else(|| project_info.targets.first())
+        .ok_or("No target available in project")?;
+    debug_println!("[DEBUG] Using target: {}", selected_target.name);
 
-    let compile_commands =
-        generate_compile_commands(&project_info, &project_dir, &toolchain, Some(first_target));
+    let compile_commands = generate_compile_commands(
+        &project_info,
+        &project_dir,
+        &toolchain,
+        Some(selected_target),
+    );
     debug_println!(
         "[DEBUG] Compile commands generated: {}",
         compile_commands.len()
     );
 
-    // 1. 处理 Object Output (存放 CDB 和 bat) - 使用第一个target的object_output
-    let raw_obj_out = &first_target.object_output;
+    // 1. 处理 Object Output (存放 CDB 和 bat) - 使用选中target的object_output
+    let raw_obj_out = &selected_target.object_output;
     let abs_object_output = project_dir.join(raw_obj_out);
     fs::create_dir_all(&abs_object_output)?;
     // 修改：使用 compute_absolute_path 替代 canonicalize
@@ -372,7 +383,12 @@ fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::
 
     // 3. 生成 build.ninja (放在 Project Dir)
     debug_println!("[DEBUG] Generating ninja build content...");
-    let ninja_content = generate_ninja_build(&project_info, &project_dir, &toolchain)?;
+    let ninja_content = generate_ninja_build_for_target(
+        &project_info,
+        &project_dir,
+        &toolchain,
+        Some(selected_target),
+    )?;
 
     debug_println!("[DEBUG] Preparing ninja build file path...");
     // 根据需求，build.ninja 必须放在 cbp 工程同一路径
@@ -391,11 +407,12 @@ fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::
 
     // 生成构建脚本文件
     debug_println!("[DEBUG] Generating build script...");
-    let build_script_content = generate_build_script(
+    let build_script_content = generate_build_script_for_target(
         &project_info,
         &toolchain,
         &project_dir,
         args.ninja_path.as_deref(),
+        Some(selected_target),
     );
     let build_script_path = project_dir.join("build.bat");
     debug_println!(
@@ -409,15 +426,21 @@ fn run_convert(args: cbp2clangd::ConvertArgs) -> Result<(), Box<dyn std::error::
     let clangd_path = workspace_root.join(".clangd");
 
     // A. 生成公共头部 (Base Config) - 只包含 CompileFlags
-    let base_config = generate_clangd_config(&project_info, &toolchain, args.no_header_insertion)?;
+    let base_config = generate_clangd_config_for_target(
+        &project_info,
+        &toolchain,
+        args.no_header_insertion,
+        Some(selected_target),
+    )?;
 
     // B. 生成项目专属片段 (Fragment)
     // 注意：现在使用target特定的object_output路径
-    let (current_path_match, fragment_content) = generate_clangd_fragment(
+    let (current_path_match, fragment_content) = generate_clangd_fragment_for_target(
         &project_info,
         &project_dir,
         &workspace_root,
         &abs_object_output,
+        Some(selected_target),
     )?;
 
     // C. 读取并合并

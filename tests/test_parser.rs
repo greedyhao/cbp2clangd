@@ -1041,6 +1041,8 @@ fn test_parse_library_with_path() {
                     <Add library="C:/path/to/lib/libabsolute.a" />
                     <!-- 普通库名 -->
                     <Add library="m" />
+                    <!-- 已带 lib 前缀和 .a 后缀的库名 -->
+                    <Add library="libplatform.a" />
                 </Linker>
             </Target>
         </Build>
@@ -1057,8 +1059,8 @@ fn test_parse_library_with_path() {
     // 验证库被正确处理
     assert_eq!(
         project_info.targets[0].linker_libs.len(),
-        3,
-        "应该有3个链接库"
+        4,
+        "应该有4个链接库"
     );
 
     // 带相对路径的库应该直接使用完整路径
@@ -1083,6 +1085,12 @@ fn test_parse_library_with_path() {
             .linker_libs
             .contains(&"-lm".to_string()),
         "应该包含普通库名"
+    );
+    assert!(
+        project_info.targets[0]
+            .linker_libs
+            .contains(&"-lplatform".to_string()),
+        "libplatform.a 应转换为 -lplatform"
     );
 }
 
@@ -1294,4 +1302,66 @@ fn test_parse_missing_output() {
         project_info.targets[0].object_output, "custom_obj_dir",
         "应该使用自定义object_output"
     );
+}
+
+#[test]
+fn test_parse_target_extra_commands_and_macros() {
+    // 验证 Target 级 ExtraCommands、$(TARGET_NAME) 宏展开和 type/compiler 属性
+    let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<CodeBlocks_project_file>
+    <FileVersion major="1" minor="6" />
+    <Project>
+        <Option title="stack" />
+        <Build>
+            <Target title="Debug">
+                <Option output="Output/$(TARGET_NAME)/bin/stack.a" prefix_auto="1" extension_auto="0" />
+                <Option object_output="Output/$(TARGET_NAME)/obj/" />
+                <Option type="2" />
+                <Option compiler="riscv32-v3" />
+                <Compiler>
+                    <Add option="-DBT_ACL_NUM=2" />
+                </Compiler>
+                <ExtraCommands>
+                    <Add after="Output\$(TARGET_NAME)\bin\postbuild.bat" />
+                </ExtraCommands>
+            </Target>
+            <Target title="Debug_1to3">
+                <Option output="Output/$(TARGET_NAME)/bin/stack_1to3.a" prefix_auto="1" extension_auto="0" />
+                <Option object_output="Output/$(TARGET_NAME)/obj/" />
+                <Option compiler="riscv32-v3" />
+                <Compiler>
+                    <Add option="-DBT_ACL_NUM=3" />
+                </Compiler>
+            </Target>
+        </Build>
+        <Unit filename="src/main.c">
+            <Option compile="1" />
+        </Unit>
+    </Project>
+</CodeBlocks_project_file>"#;
+
+    let result = parse_cbp_file(xml_content, None);
+    assert!(result.is_ok());
+    let project_info = result.unwrap();
+    assert_eq!(project_info.targets.len(), 2);
+
+    let debug = &project_info.targets[0];
+    assert_eq!(debug.name, "Debug");
+    assert_eq!(debug.output, "Output/Debug/bin/stack.a");
+    assert_eq!(debug.object_output, "Output/Debug/obj/");
+    assert_eq!(debug.target_type.as_deref(), Some("2"));
+    assert_eq!(debug.compiler_id.as_deref(), Some("riscv32-v3"));
+    assert_eq!(debug.postbuild_commands.len(), 1);
+    assert_eq!(
+        debug.postbuild_commands[0],
+        r"Output\Debug\bin\postbuild.bat"
+    );
+    assert!(debug.cflags.contains(&"-DBT_ACL_NUM=2".to_string()));
+
+    let debug_1to3 = &project_info.targets[1];
+    assert_eq!(debug_1to3.name, "Debug_1to3");
+    assert_eq!(debug_1to3.output, "Output/Debug_1to3/bin/stack_1to3.a");
+    assert_eq!(debug_1to3.object_output, "Output/Debug_1to3/obj/");
+    assert!(debug_1to3.postbuild_commands.is_empty());
+    assert!(debug_1to3.cflags.contains(&"-DBT_ACL_NUM=3".to_string()));
 }

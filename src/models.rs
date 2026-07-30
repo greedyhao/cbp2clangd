@@ -41,11 +41,16 @@ pub struct BuildTarget {
     pub name: String,                 // Target名称 (如 "Debug", "Release")
     pub output: String,               // 输出文件路径
     pub object_output: String,        // 对象文件输出目录
+    pub working_dir: String,          // 工作目录
+    pub target_type: Option<String>,  // Code::Blocks target type
+    pub compiler_id: Option<String>,  // Target-specific compiler ID
     pub cflags: Vec<String>,          // 编译选项
     pub defines: Vec<String>,         // 宏定义 (-D)
     pub include_dirs: Vec<String>,    // 头文件目录 (-I)
     pub linker_options: Vec<String>,  // 链接器选项
     pub linker_libs: Vec<String>,     // 链接库
     pub linker_lib_dirs: Vec<String>, // 库搜索路径
-    pub march_info: MarchInfo,        // 架构信息
+    pub prebuild_commands: Vec<String>,
+    pub postbuild_commands: Vec<String>,
+    pub march_info: MarchInfo, // 架构信息
 }
