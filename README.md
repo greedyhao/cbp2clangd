@@ -21,7 +21,9 @@
 - 智能处理特殊文件：普通文件默认编译链接，特殊文件需明确指定 compile="1"才编译
 - 修复了特殊文件编译命令没有运行的问题，确保所有需要编译的特殊文件都能正确触发编译
 - 特殊文件输出作为隐式依赖添加到链接规则中，类似库文件的处理方式
-- **支持多 Target**: 解析并支持 Debug/Release 等多个 Build Target，使用第一个 Target 配置进行生成
+- **支持多 Target**：解析 Debug/Release 等多个 Build Target；默认使用第一个 Target，也可通过 `--target <name>` 显式选择目标
+- **Target 宏与命令**：支持 `$(TARGET_NAME)`、`$(TARGET_OUTPUT_DIR)`、`$(TARGET_OBJECT_DIR)`，以及 Target 级 `<ExtraCommands>`
+- **静态库链接参数规范化**：`libplatform.a` 等无路径库名会转换为 `-lplatform`，避免链接器重复追加 `.a`
 - **支持多项目合并**：通过 `merge-compile-commands` 命令合并多个 CBP 项目的 compile_commands.json
 - **.clangd 优化**：合并时自动将 CompilationDatabase 整合到主 CompileFlags 块中
 
@@ -52,7 +54,7 @@
 
 ```bash
 # 转换单个 CBP 项目
-cbp2clangd [--debug] [--test] [--linker <type>] [--ninja <path>] <cbp文件路径> [输出目录路径]
+cbp2clangd [--debug] [--test] [--no-header-insertion] [--linker <type>] [--ninja <path>] [--target <name>] <cbp文件路径> [输出目录路径]
 
 # 合并多个项目的 compile_commands.json
 cbp2clangd merge-compile-commands [--debug] [--output-dir <dir>] <cbp文件1> [cbp文件2] ...
@@ -70,6 +72,7 @@ cbp2clangd --list-compilers
 - `--no-header-insertion`: 禁用 clangd 自动插入头文件功能，在 .clangd 配置中添加 `Completion: HeaderInsertion: Never`
 - `--linker <type>` 或 `-l <type>`: 指定链接器类型（gcc 或 ld，默认为 gcc）
 - `--ninja <path>` 或 `-n <path>`: 指定自定义 ninja 可执行文件路径
+- `--target <name>`: 按 Target 的 `title` 精确选择构建目标；未指定时使用 XML 中的第一个 Target。Target 不存在时会报错并列出可用目标
 - `<cbp文件路径>`: Code::Blocks 项目文件（.cbp）的路径
 - `<输出目录路径>`: 生成配置文件的目标目录（通常是项目根目录）
 
@@ -148,6 +151,25 @@ cbp2clangd --no-header-insertion app.cbp
 Completion:
   HeaderInsertion: Never
 ```
+
+#### 示例 5：指定 Build Target
+
+```bash
+cbp2clangd --target Debug_1to3 app.cbp
+```
+
+该命令会使用 `Debug_1to3` 的编译宏、输出目录、链接参数和 Target 级构建命令生成全部构建文件。未指定 `--target` 时默认使用第一个 Target。
+
+### 静态库链接名
+
+不带目录的静态库文件名会按 GCC/LD 的 `-l` 规则规范化：
+
+```text
+libplatform.a  ->  -lplatform
+platform.a     ->  -lplatform
+```
+
+带目录的库路径（例如 `../lib/libplatform.a`）会保留为文件路径，不转换为 `-l` 参数。
 
 ### 合并多项目 compile_commands.json
 
