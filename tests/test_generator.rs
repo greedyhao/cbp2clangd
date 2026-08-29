@@ -1,4 +1,6 @@
-use cbp2clangd::{ToolchainConfig, generate_ninja_build, parse_cbp_file};
+use cbp2clangd::{
+    ToolchainConfig, generate_build_script_for_target, generate_ninja_build, parse_cbp_file,
+};
 use std::path::Path;
 
 /// 为测试创建一个通用的 ToolchainConfig
@@ -382,5 +384,111 @@ fn test_generate_ninja_build_for_target_with_extra_commands() {
     assert!(
         debug_script.contains(r"Debug\bin\postbuild.bat"),
         "postbuild 路径中应展开 $(TARGET_NAME) 为 Debug"
+    );
+}
+
+#[test]
+fn test_build_script_aborts_on_prebuild_failure() {
+    // pre 命令失败时应输出 "error:" 前缀行并 exit /b，中止后续构建
+    let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<CodeBlocks_project_file>
+    <FileVersion major="1" minor="6" />
+    <Project>
+        <Option title="stack" />
+        <Build>
+            <Target title="Debug">
+                <Option output="Output/$(TARGET_NAME)/bin/stack.elf" prefix_auto="1" extension_auto="0" />
+                <Option object_output="Output/$(TARGET_NAME)/obj/" />
+            </Target>
+        </Build>
+        <ExtraCommands>
+            <Add before="scripts\check.bat" />
+        </ExtraCommands>
+        <Unit filename="src/main.c">
+            <Option compile="1" />
+        </Unit>
+    </Project>
+</CodeBlocks_project_file>"#;
+
+    let project_info = parse_cbp_file(xml_content, None).unwrap();
+    let toolchain = test_toolchain();
+
+    let script = generate_build_script_for_target(
+        &project_info,
+        &toolchain,
+        Path::new("."),
+        None,
+        None,
+    );
+
+    // 失败分支：echo error 行 + exit /b（先捕获 errorlevel，再逐行判断）
+    assert!(
+        script.contains("set CBP2CLANGD_HOOK_RC=%errorlevel%"),
+        "prebuild 后应捕获退出码"
+    );
+    assert!(
+        script.contains("echo error: prebuild command failed"),
+        "prebuild 失败时应输出 error 提示行"
+    );
+    assert!(
+        script.contains("if %CBP2CLANGD_HOOK_RC% neq 0 exit /b %CBP2CLANGD_HOOK_RC%"),
+        "prebuild 失败时应以非零码中止脚本"
+    );
+    // 中止必须发生在 ninja 构建之前（echo error 行先于 ninja 命令出现）
+    let error_pos = script.find("echo error: prebuild command failed").unwrap();
+    let ninja_pos = script.find("-f build.ninja").unwrap();
+    assert!(
+        error_pos < ninja_pos,
+        "prebuild 失败中止应先于 ninja 构建命令"
+    );
+}
+
+#[test]
+fn test_build_script_aborts_on_postbuild_failure() {
+    // post 命令失败时应输出 "error:" 前缀行并 exit /b
+    let xml_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<CodeBlocks_project_file>
+    <FileVersion major="1" minor="6" />
+    <Project>
+        <Option title="stack" />
+        <Build>
+            <Target title="Debug">
+                <Option output="Output/$(TARGET_NAME)/bin/stack.elf" prefix_auto="1" extension_auto="0" />
+                <Option object_output="Output/$(TARGET_NAME)/obj/" />
+            </Target>
+        </Build>
+        <ExtraCommands>
+            <Add after="Output\$(TARGET_NAME)\bin\postbuild.bat" />
+        </ExtraCommands>
+        <Unit filename="src/main.c">
+            <Option compile="1" />
+        </Unit>
+    </Project>
+</CodeBlocks_project_file>"#;
+
+    let project_info = parse_cbp_file(xml_content, None).unwrap();
+    let toolchain = test_toolchain();
+    let target = project_info.targets.first().unwrap();
+
+    let script = generate_build_script_for_target(
+        &project_info,
+        &toolchain,
+        Path::new("."),
+        None,
+        Some(target),
+    );
+
+    assert!(
+        script.contains("echo error: postbuild command failed"),
+        "postbuild 失败时应输出 error 提示行"
+    );
+    // postbuild 失败分支应出现在 ninja 之后（即构建完成后仍会检查 post 命令）
+    let ninja_pos = script.find("-f build.ninja").unwrap();
+    let error_pos = script.find("echo error: postbuild command failed").unwrap();
+    assert!(error_pos > ninja_pos);
+    // 该 Target 只有 post 命令：postbuild 应有自己的失败中止分支
+    assert!(
+        script.matches("if %CBP2CLANGD_HOOK_RC% neq 0 exit /b %CBP2CLANGD_HOOK_RC%").count() >= 1,
+        "postbuild 应有失败中止分支"
     );
 }

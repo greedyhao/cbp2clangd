@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-08-29
+
+### Changed
+- `build.bat` 中每个 pre/post 构建命令执行后检查退出码：失败时输出以 `error:` 为前缀的提示行（可被 cbp-build-manager 的诊断收集器识别并汇总到编译诊断汇总），然后以非零码中止脚本，不再继续执行后续命令
+
+## [1.7.1] - 2026-08-27
+
+### Fixed
+- 补齐 1.6.0/1.7.0 版本文档说明
+
+## [1.7.0] - 2026-08-25
+
+### Changed
+- 扩展兼容性版本检查（cbp-build-manager 要求 cbp2clangd ≥ 1.7.0）
+- `build.bat` 中 ninja 命令后已有 `%errorlevel%` 检查，构建失败以非零码退出
+
+## [1.6.0] - 2026-08-04
+
+### Added
+- 新增 `--target <name>` 参数，可按 Target 的 `title` 精确选择 Build Target
+- 未指定 `--target` 时默认使用 XML 中的第一个 Target
+- Target 支持 `working_dir`、`type`、Target 级 `compiler` 和 `ExtraCommands`
+- 支持展开 `$(TARGET_NAME)`、`$(TARGET_OUTPUT_DIR)`、`$(TARGET_OBJECT_DIR)` 宏
+- 生成器支持按指定 Target 生成 compile_commands、Ninja、build.bat 和 `.clangd`
+
+### Changed
+- 选中的 Target 一致应用于编译、链接、输出目录、对象目录和构建脚本
+- Target 级 pre/post build command 优先于 Project 级命令；为空时回退到 Project 级命令
+
+### Fixed
+- 修复 `libplatform.a` 被错误转换为 `-lplatform.a` 的问题，现在转换为 `-lplatform`
+- 带目录的静态库路径仍保留为原始文件路径
+
 ## [1.5.0] - 2026-05-31
 
 ### Added

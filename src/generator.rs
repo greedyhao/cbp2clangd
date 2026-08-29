@@ -1406,12 +1406,23 @@ pub fn generate_build_script_for_target(
     script_content.push_str("\n");
 
     // 2. 添加预构建命令
+    // 每个 pre 命令单独检查退出码：脚本失败时中止构建，非零码传播给调用方。
+    // 失败时输出 "error:" 前缀行，供扩展的诊断收集器识别进编译诊断汇总。
+    // 注意：不使用 if (...) 括号块 —— 命令文本或提示语中的 `)` 会提前闭合块，
+    // 改为逐行 if + 捕获变量。
     if !prebuild_commands.is_empty() {
         script_content.push_str("rem Prebuild commands\n");
         for cmd in &prebuild_commands {
-            script_content.push_str("pushd %~dp0\n");
             let processed_cmd = cmd.replace("$(PROJECT_NAME)", &project_info.project_name);
+            script_content.push_str("pushd %~dp0\n");
             script_content.push_str(&format!("call {}\n", processed_cmd));
+            script_content.push_str("set CBP2CLANGD_HOOK_RC=%errorlevel%\n");
+            script_content.push_str(
+                "if %CBP2CLANGD_HOOK_RC% neq 0 echo error: prebuild command failed, exit code %CBP2CLANGD_HOOK_RC%: ",
+            );
+            script_content.push_str(&format!("{}\n", processed_cmd));
+            script_content.push_str("if %CBP2CLANGD_HOOK_RC% neq 0 popd\n");
+            script_content.push_str("if %CBP2CLANGD_HOOK_RC% neq 0 exit /b %CBP2CLANGD_HOOK_RC%\n");
             script_content.push_str("popd\n");
         }
         script_content.push_str("\n");
@@ -1428,12 +1439,20 @@ pub fn generate_build_script_for_target(
     script_content.push_str("\n");
 
     // 4. 添加后构建命令
+    // 与 pre 命令相同：失败时输出 "error:" 前缀行并中止，非零退出码传播给调用方。
     if !postbuild_commands.is_empty() {
         script_content.push_str("rem Postbuild commands\n");
         for cmd in &postbuild_commands {
-            script_content.push_str("pushd %~dp0\n");
             let processed_cmd = cmd.replace("$(PROJECT_NAME)", &project_info.project_name);
+            script_content.push_str("pushd %~dp0\n");
             script_content.push_str(&format!("call {}\n", processed_cmd));
+            script_content.push_str("set CBP2CLANGD_HOOK_RC=%errorlevel%\n");
+            script_content.push_str(
+                "if %CBP2CLANGD_HOOK_RC% neq 0 echo error: postbuild command failed, exit code %CBP2CLANGD_HOOK_RC%: ",
+            );
+            script_content.push_str(&format!("{}\n", processed_cmd));
+            script_content.push_str("if %CBP2CLANGD_HOOK_RC% neq 0 popd\n");
+            script_content.push_str("if %CBP2CLANGD_HOOK_RC% neq 0 exit /b %CBP2CLANGD_HOOK_RC%\n");
             script_content.push_str("popd\n");
         }
         script_content.push_str("\n");
