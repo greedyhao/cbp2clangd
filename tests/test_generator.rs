@@ -423,16 +423,25 @@ fn test_build_script_aborts_on_prebuild_failure() {
 
     // 失败分支：echo error 行 + exit /b（先捕获 errorlevel，再逐行判断）
     assert!(
-        script.contains("set CBP2CLANGD_HOOK_RC=%errorlevel%"),
-        "prebuild 后应捕获退出码"
+        script.contains("@set CBP2CLANGD_HOOK_RC=%errorlevel%"),
+        "prebuild 后应捕获退出码（@ 抑制回显）"
     );
     assert!(
-        script.contains("echo error: prebuild command failed"),
-        "prebuild 失败时应输出 error 提示行"
+        script.contains("@if %CBP2CLANGD_HOOK_RC% neq 0 echo error: prebuild command failed"),
+        "prebuild 失败时应输出 error 提示行（@ 抑制命令回显）"
     );
     assert!(
-        script.contains("if %CBP2CLANGD_HOOK_RC% neq 0 exit /b %CBP2CLANGD_HOOK_RC%"),
+        script.contains("@if %CBP2CLANGD_HOOK_RC% neq 0 exit /b %CBP2CLANGD_HOOK_RC%"),
         "prebuild 失败时应以非零码中止脚本"
+    );
+    // 被 call 的脚本可能残留 echo on，检查行必须都带 @ 前缀，避免日志假报错
+    assert!(
+        !script.contains("\nset CBP2CLANGD_HOOK_RC="),
+        "捕获退出码的 set 不应回显"
+    );
+    assert!(
+        !script.contains("\nif %CBP2CLANGD_HOOK_RC%"),
+        "检查退出码的 if 不应回显"
     );
     // 中止必须发生在 ninja 构建之前（echo error 行先于 ninja 命令出现）
     let error_pos = script.find("echo error: prebuild command failed").unwrap();
@@ -479,8 +488,8 @@ fn test_build_script_aborts_on_postbuild_failure() {
     );
 
     assert!(
-        script.contains("echo error: postbuild command failed"),
-        "postbuild 失败时应输出 error 提示行"
+        script.contains("@if %CBP2CLANGD_HOOK_RC% neq 0 echo error: postbuild command failed"),
+        "postbuild 失败时应输出 error 提示行（@ 抑制命令回显）"
     );
     // postbuild 失败分支应出现在 ninja 之后（即构建完成后仍会检查 post 命令）
     let ninja_pos = script.find("-f build.ninja").unwrap();
@@ -488,7 +497,7 @@ fn test_build_script_aborts_on_postbuild_failure() {
     assert!(error_pos > ninja_pos);
     // 该 Target 只有 post 命令：postbuild 应有自己的失败中止分支
     assert!(
-        script.matches("if %CBP2CLANGD_HOOK_RC% neq 0 exit /b %CBP2CLANGD_HOOK_RC%").count() >= 1,
+        script.matches("@if %CBP2CLANGD_HOOK_RC% neq 0 exit /b %CBP2CLANGD_HOOK_RC%").count() >= 1,
         "postbuild 应有失败中止分支"
     );
 }

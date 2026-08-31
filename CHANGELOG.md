@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] - 2026-08-29
+
+### Fixed
+- `build.bat` 中 pre/post 构建命令的退出码检查行（`set CBP2CLANGD_HOOK_RC`、`if ... neq 0 ...`、`pushd`/`popd`）加 `@` 前缀抑制回显：被 `call` 的脚本可能把 echo 打开并在返回后残留，导致这些 bookkeeping 命令连同 `error:` 提示模板文字一起被打进日志，产生假报错。`@` 只抑制命令回显，不影响真实失败时 `echo error: ...` 的输出
+
 ## [1.8.0] - 2026-08-29
 
 ### Changed
