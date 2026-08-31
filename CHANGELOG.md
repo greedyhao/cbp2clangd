@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.2] - 2026-08-31
+
+### Fixed
+- `merge-compile-commands --json` 现在接受 `--output-dir <dir>`：指定 `.clangd` 的写入位置（工作区根目录）。此前 `--json` 模式强制把 `.clangd` 写到第一个 json 所在目录（obj 输出目录），导致工作区根目录的 `.clangd` 保留着各项目 convert 时追加的 `If/PathMatch` 片段，合并的"拍平"行为失效
+- 修正 `.clangd` 合并时旧 `CompilationDatabase` 行的去重条件：连续执行两次合并会留下两条 `CompilationDatabase`（后一条被 YAML 解析为前一条的子项），现在始终跳过旧行
+
 ## [1.8.1] - 2026-08-29
 
 ### Fixed

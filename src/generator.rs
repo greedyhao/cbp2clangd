@@ -1593,8 +1593,9 @@ pub fn merge_compile_commands(
                     // 下一行添加 CompilationDatabase
                     new_lines.push(format!("  CompilationDatabase: {}", db_path_str));
                     added = true;
-                } else if !added || trimmed != "CompilationDatabase:" {
-                    // 跳过已有的 CompilationDatabase 行（避免重复）
+                } else if trimmed.starts_with("CompilationDatabase:") {
+                    // 跳过已有的 CompilationDatabase 行（避免重复，无论之前是否已插入新行）
+                } else {
                     new_lines.push(line.to_string());
                 }
             }
@@ -1971,5 +1972,71 @@ mod tests {
         assert!(result.contains("detailedLabels: true"));
         assert!(result.contains("Diagnostics:"));
         assert!(result.contains("unusedIncludes: false"));
+    }
+
+    /// 构造带既有片段的 .clangd 内容并执行 merge_compile_commands 的 .clangd 重写步骤，
+    /// 返回最终写出的内容（通过临时目录落地，避免直接依赖私有实现）
+    fn run_merge_and_read_clangd(
+        dir: &Path,
+        json_paths: &[PathBuf],
+        existing_clangd: &str,
+    ) -> String {
+        let clangd_path = dir.join(".clangd");
+        fs::write(&clangd_path, existing_clangd).unwrap();
+        merge_compile_commands(json_paths, dir).unwrap();
+        fs::read_to_string(&clangd_path).unwrap()
+    }
+
+    #[test]
+    fn test_merge_compile_commands_flattens_clangd_at_workspace_root() {
+        let base = std::env::temp_dir().join(format!("cbp2clangd-test-{}", std::process::id()));
+        let proj_dir = base.join("proj").join("obj");
+        fs::create_dir_all(&proj_dir).unwrap();
+
+        // 第一个 json（合并目标）
+        let json1 = proj_dir.join("compile_commands.json");
+        fs::write(
+            &json1,
+            r#"[{"directory": "C:/p1", "file": "a.c", "command": "gcc -c a.c"}]"#,
+        )
+        .unwrap();
+
+        // 模拟 convert 留下的带片段的 .clangd
+        let existing = "CompileFlags:\n  Add:\n    - -xc\n\n---\nIf:\n  PathMatch: app/src/.*\n\nCompileFlags:\n  CompilationDatabase: C:/p1/obj\n";
+        let result = run_merge_and_read_clangd(&base, &[json1], existing);
+
+        // 片段必须被拍平
+        assert!(!result.contains("PathMatch"), "fragments should be removed");
+        assert!(!result.contains("---"), "fragment separators should be removed");
+        // CompilationDatabase 指向第一个 json 所在目录
+        let expected_db = proj_dir.to_string_lossy().replace('\\', "/");
+        assert!(result.contains(&format!("CompilationDatabase: {}", expected_db)));
+
+        fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn test_merge_compile_commands_no_duplicate_compilation_database() {
+        let base = std::env::temp_dir().join(format!("cbp2clangd-test-dup-{}", std::process::id()));
+        let proj_dir = base.join("proj").join("obj");
+        fs::create_dir_all(&proj_dir).unwrap();
+
+        let json1 = proj_dir.join("compile_commands.json");
+        fs::write(&json1, "[]").unwrap();
+
+        // .clangd 已有一条旧的 CompilationDatabase（上次合并写入的）
+        let existing = "CompileFlags:\n  CompilationDatabase: C:/old/location\n  Add:\n    - -xc";
+        let result = run_merge_and_read_clangd(&base, &[json1.clone()], existing);
+
+        // 只能有一条 CompilationDatabase，且指向新位置
+        let count = result.matches("CompilationDatabase:").count();
+        assert_eq!(count, 1, "should keep exactly one CompilationDatabase, got:\n{}", result);
+        let expected_db = proj_dir.to_string_lossy().replace('\\', "/");
+        assert!(result.contains(&format!("CompilationDatabase: {}", expected_db)));
+        // 其他配置保留
+        assert!(result.contains("Add:"));
+        assert!(result.contains("-xc"));
+
+        fs::remove_dir_all(&base).ok();
     }
 }

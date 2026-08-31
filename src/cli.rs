@@ -101,13 +101,9 @@ fn parse_merge_compile_commands(
     }
 
     // 检查并移除 --output-dir 参数
+    // --json 模式下同样接受：指定 .clangd 所在的工作区根目录（合并后的 json 写在第一个 json 原位置）
     let mut output_dir = None;
     if let Some(pos) = args.iter().position(|arg| arg == "--output-dir") {
-        if direct_json {
-            eprintln!("Error: --output-dir is not allowed with --json mode");
-            print_merge_usage(&program_name);
-            std::process::exit(1);
-        }
         if pos + 1 < args.len() {
             output_dir = Some(PathBuf::from(&args[pos + 1]));
             args.remove(pos + 1);
@@ -151,10 +147,13 @@ fn parse_merge_compile_commands(
             eprintln!("Error: No valid compile_commands.json files found");
             std::process::exit(1);
         }
-        let output_dir = json_paths[0]
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf();
+        let output_dir = output_dir.unwrap_or_else(|| {
+            // 默认：第一个 json 所在目录（兼容旧用法）
+            json_paths[0]
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .to_path_buf()
+        });
         (json_paths, output_dir)
     } else {
         // CBP 模式：解析每个 CBP 文件，获取 compile_commands.json 的路径
@@ -413,7 +412,7 @@ fn print_merge_usage(program: &str) {
         "  --json              Treat input files as compile_commands.json directly (not .cbp)"
     );
     eprintln!(
-        "  --output-dir <dir>  Specify workspace root directory for .clangd file (CBP mode only)"
+        "  --output-dir <dir>  Specify workspace root directory for .clangd file (default: first json's directory)"
     );
     eprintln!("  --debug             Enable debug logging");
 }
