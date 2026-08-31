@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-08-31
+
+### Added
+- 生成 `.clangd` 时自动探测并添加工具链自带的系统头文件目录（`-I` 形式写入 `CompileFlags.Add`）：从 C_COMPILER 名称推断目标三元组（如 `riscv32-elf-gcc.exe` → `riscv32-elf`），探测 `<MASTER_PATH>/<triple>/include`（sysroot）与 `<MASTER_PATH>/lib/gcc/<triple>/<最新版本>/include[-fixed]`（gcc 内部目录），目录存在才添加。clangd 不真正执行编译器，无法获取隐式头文件搜索路径，需显式列出
+
 ## [1.8.2] - 2026-08-31
 
 ### Fixed

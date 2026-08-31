@@ -91,6 +91,18 @@ pub fn generate_clangd_config_for_target(
         })
         .collect::<Vec<_>>();
 
+    // 探测工具链自带的系统头文件目录（sysroot include、gcc 内部 include/include-fixed）
+    // clangd 不执行真实编译，无法从编译器获取隐式头文件搜索路径，需要显式加入
+    let system_includes = toolchain
+        .detect_system_include_dirs()
+        .iter()
+        .map(|p| {
+            let inc = format!("-I{}", p);
+            debug_println!("[DEBUG generator] Detected system include path: {}", inc);
+            inc
+        })
+        .collect::<Vec<_>>();
+
     // 构建Add部分
     debug_println!("[DEBUG generator] Building Add flags section...");
     let mut add_flags = vec!["-xc", "-target", "riscv32-unknown-elf"];
@@ -99,6 +111,11 @@ pub fn generate_clangd_config_for_target(
     // 添加include路径
     debug_println!("[DEBUG generator] Adding include paths to Add flags...");
     for inc in &includes {
+        add_flags.push(&inc[..]);
+    }
+
+    // 添加探测到的工具链系统头文件目录
+    for inc in &system_includes {
         add_flags.push(&inc[..]);
     }
 

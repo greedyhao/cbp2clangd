@@ -145,6 +145,59 @@ impl ToolchainConfig {
         format!("{}\\bin\\{}", self.toolchain_base_path, exe)
     }
 
+    /// 从编译器可执行文件名推断目标三元组（如 "riscv32-elf-gcc.exe" → "riscv32-elf"）。
+    /// 去掉 .exe 后缀，截取最后一个 '-' 之前的部分；没有 '-' 或为空则返回 None。
+    fn target_triple(&self) -> Option<String> {
+        let exe = self.c_compiler.as_deref()?;
+        let stem = exe.strip_suffix(".exe").unwrap_or(exe);
+        let triple = match stem.rsplit_once('-') {
+            Some((prefix, _)) if !prefix.is_empty() => prefix,
+            _ => return None,
+        };
+        Some(triple.to_string())
+    }
+
+    /// 探测工具链自带的系统头文件目录（存在才返回）。
+    /// 覆盖两类布局（以 MASTER_PATH = C:/TC、triple = riscv32-elf 为例）：
+    ///   - sysroot 布局: C:/TC/riscv32-elf/include
+    ///   - gcc 内部目录: C:/TC/lib/gcc/riscv32-elf/<version>/include[-fixed]
+    /// gcc 内部目录的 <version> 通过扫描 lib/gcc/<triple>/ 下的子目录发现。
+    pub fn detect_system_include_dirs(&self) -> Vec<String> {
+        let mut dirs = Vec::new();
+        let base = std::path::Path::new(&self.toolchain_base_path);
+        let fs_ok = |p: &std::path::Path| p.is_dir();
+
+        // 1. sysroot: <base>/<triple>/include
+        if let Some(triple) = self.target_triple() {
+            let sysroot_inc = base.join(&triple).join("include");
+            if fs_ok(&sysroot_inc) {
+                dirs.push(sysroot_inc.to_string_lossy().to_string());
+            }
+
+            // 2. gcc 内部: <base>/lib/gcc/<triple>/<version>/{include,include-fixed}
+            let gcc_dir = base.join("lib").join("gcc").join(&triple);
+            if let Ok(entries) = std::fs::read_dir(&gcc_dir) {
+                // 版本目录按名称倒序，取最大版本
+                let mut versions: Vec<_> = entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().is_dir())
+                    .map(|e| e.file_name().to_string_lossy().to_string())
+                    .collect();
+                versions.sort();
+                if let Some(latest) = versions.pop() {
+                    for sub in ["include", "include-fixed"] {
+                        let inc = gcc_dir.join(&latest).join(sub);
+                        if fs_ok(&inc) {
+                            dirs.push(inc.to_string_lossy().to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        dirs
+    }
+
     /// 返回来自 default.conf 的额外 include 路径（不含 -I 前缀，调用方自行添加）
     pub fn include_paths(&self) -> &[String] {
         &self.cb_include_dirs
@@ -419,5 +472,121 @@ mod tests {
 
         let toolchain = ToolchainConfig::resolve_toolchain("riscv32", &cb_config).unwrap();
         assert_eq!(toolchain.toolchain_base_path, "C:\\RV32");
+    }
+
+    /// 在临时目录构造 RV32-V3 风格的工具链布局，用于探测测试
+    fn make_fake_toolchain(base: &std::path::Path, triple: &str, version: &str) {
+        for d in [
+            base.join("bin"),
+            base.join(triple).join("include"),
+            base.join("lib")
+                .join("gcc")
+                .join(triple)
+                .join(version)
+                .join("include"),
+            base.join("lib")
+                .join("gcc")
+                .join(triple)
+                .join(version)
+                .join("include-fixed"),
+        ] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+    }
+
+    fn toolchain_with(base: &str, c_compiler: Option<&str>) -> ToolchainConfig {
+        ToolchainConfig {
+            toolchain_base_path: base.to_string(),
+            c_compiler: c_compiler.map(|s| s.to_string()),
+            cpp_compiler: None,
+            linker: None,
+            lib_linker: None,
+            cb_include_dirs: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_target_triple() {
+        let tc = toolchain_with("C:\\TC", Some("riscv32-elf-gcc.exe"));
+        assert_eq!(tc.target_triple().as_deref(), Some("riscv32-elf"));
+
+        // 无前缀编译器名
+        let tc = toolchain_with("C:\\TC", Some("gcc.exe"));
+        assert_eq!(tc.target_triple(), None);
+
+        // 未设置 C_COMPILER
+        let tc = toolchain_with("C:\\TC", None);
+        assert_eq!(tc.target_triple(), None);
+    }
+
+    #[test]
+    fn test_detect_system_include_dirs_real_layout() {
+        let tmp = std::env::temp_dir().join(format!("cbp2clangd-tc-{}", std::process::id()));
+        let base = tmp.join("RV32-V3");
+        make_fake_toolchain(&base, "riscv32-elf", "14.2.0");
+
+        let tc = toolchain_with(&base.to_string_lossy(), Some("riscv32-elf-gcc.exe"));
+        let dirs = tc.detect_system_include_dirs();
+
+        let norm = |p: std::path::PathBuf| p.to_string_lossy().to_string();
+        assert_eq!(dirs.len(), 3, "got: {:?}", dirs);
+        assert!(dirs.contains(&norm(base.join("riscv32-elf").join("include"))));
+        assert!(
+            dirs.contains(&norm(
+                base.join("lib")
+                    .join("gcc")
+                    .join("riscv32-elf")
+                    .join("14.2.0")
+                    .join("include")
+            ))
+        );
+        assert!(
+            dirs.contains(&norm(
+                base.join("lib")
+                    .join("gcc")
+                    .join("riscv32-elf")
+                    .join("14.2.0")
+                    .join("include-fixed")
+            ))
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn test_detect_system_include_dirs_picks_latest_version() {
+        let tmp = std::env::temp_dir().join(format!("cbp2clangd-tc2-{}", std::process::id()));
+        let base = tmp.join("TC");
+        // 两个版本目录，应取 13.3.0（字典序最大）
+        make_fake_toolchain(&base, "riscv32-elf", "12.2.0");
+        make_fake_toolchain(&base, "riscv32-elf", "13.3.0");
+
+        let tc = toolchain_with(&base.to_string_lossy(), Some("riscv32-elf-gcc.exe"));
+        let dirs = tc.detect_system_include_dirs();
+
+        assert_eq!(dirs.len(), 3, "got: {:?}", dirs);
+        assert!(
+            dirs[1].contains("13.3.0"),
+            "should pick latest version: {:?}",
+            dirs
+        );
+        assert!(
+            dirs[2].contains("13.3.0"),
+            "should pick latest version: {:?}",
+            dirs
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn test_detect_system_include_dirs_missing_dirs() {
+        // 目录不存在 → 返回空，不报错
+        let tc = toolchain_with("C:\\Nonexistent\\TC", Some("riscv32-elf-gcc.exe"));
+        assert!(tc.detect_system_include_dirs().is_empty());
+
+        // 无目标前缀的编译器 → 返回空
+        let tc = toolchain_with("C:\\Nonexistent\\TC", Some("gcc.exe"));
+        assert!(tc.detect_system_include_dirs().is_empty());
     }
 }
